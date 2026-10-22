@@ -2780,6 +2780,7 @@ button.reel-action:disabled {
 }
 .feed-overlay {
   position: absolute;
+  z-index: 4;
   inset: auto 0 0 0;
   display: flex;
   align-items: flex-end;
@@ -2830,6 +2831,7 @@ button.reel-action:disabled {
 }
 .feed-rail {
   display: flex;
+  pointer-events: auto;
   flex-direction: column;
   align-items: center;
   gap: 14px;
@@ -2860,6 +2862,7 @@ button.reel-action:disabled {
 }
 .feed-nav {
   position: absolute;
+  z-index: 4;
   right: 18px;
   top: 50%;
   transform: translateY(-50%);
@@ -2889,6 +2892,7 @@ button.reel-action:disabled {
 }
 .feed-busy {
   position: absolute;
+  z-index: 6;
   inset: 0;
   display: grid;
   place-items: center;
