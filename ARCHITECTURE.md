@@ -346,8 +346,10 @@ stats, a rail with like / comments / send / mute / open-on-TikTok, up/down arrow
 panel with replies and a composer, and a chat picker for "send this video".
 
 Stories (`pages/Stories.tsx`): a row of authors in gradient rings with their story counts, a tile grid (a video frame or
-the photo, a badge while it downloads), a full-screen viewer that plays videos, holds photos five seconds and steps with
-← / →, and "Check now". Settings → Logging also holds the story toggle, interval, retention and the per-account picker.
+the photo, a caption and a badge while it downloads), a full-screen 9:16 viewer (bounded by both the screen width and
+92 % of its height) that plays videos, holds photos five seconds and steps with ← / →, and "Check now". Settings →
+Logging also holds the story toggle, interval, retention and the per-account picker. The page's class names are pinned
+to the stylesheet by `pages/storiesCss.test.ts` (see §10).
 
 Settings → Logging holds the media/history limits, session refresh and the re-check interval; Settings → TikTok holds
 the connection, the session paste panel and **Diagnostics** ("Check what is being read" / "Show the page's structure"),
@@ -537,7 +539,10 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
   catch-up); `tt/feedApi.test.ts` (the API feed and its comments); `tt/stories.test.ts` (tray/batch parsers over the
   live shapes, a photo story, an item without media, the delay bounds, stored-once, the retention sweep deleting story
   and file, the encrypted identity, a manual check while the schedule is off).
-* `web`: vitest for the text renderer and the Opus/OGG recorder, typecheck, production build.
+* `web` (12 tests): vitest for the text renderer and the Opus/OGG recorder, plus `pages/storiesCss.test.ts` —
+  every `story-*`/`page-*` class the markup uses has a rule in `styles.css` and every `story-*` rule is used by
+  markup (a renamed class in a ported page is invisible to the type-check and the build); typecheck, production
+  build.
 * `chromium/manager`: `CGO_ENABLED=0 go test ./...` (tokens shared with `supervisor/tokens.ts`, route allowlist, VNC
   tunnel), also run in the image build.
 * `scripts/dev/dom-check.mts` (dev, needs a Chromium): the page agent against the fake TikTok, with and without

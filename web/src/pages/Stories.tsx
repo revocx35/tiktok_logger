@@ -74,7 +74,7 @@ export function StoriesPage() {
 
   return (
     <div className="page stories-page">
-      <header className="page-head">
+      <header className="page-head row between wrap">
         <div>
           <h1>Stories</h1>
           <p className="muted small">
@@ -83,7 +83,7 @@ export function StoriesPage() {
                 {status.items} stor{status.items === 1 ? 'y' : 'ies'} from {status.authors} account{status.authors === 1 ? '' : 's'}
                 {status.pending ? ` · ${status.pending} still downloading` : ''}
                 {status.lastCheckAt ? ` · last check ${when(status.lastCheckAt)}` : ''}
-                {status.nextCheckAt ? ` · next ${when(status.nextCheckAt)}` : ''}
+                {status.nextCheckAt ? ` · next ${until(status.nextCheckAt)}` : ''}
               </>
             ) : (
               'Loading…'
@@ -116,7 +116,7 @@ export function StoriesPage() {
               {a.avatarUrl ? <img src={a.avatarUrl} alt="" loading="lazy" /> : <span className="story-initial">{(a.username ?? '?').slice(0, 1).toUpperCase()}</span>}
             </span>
             <span className="story-author-name">@{a.username ?? a.id.slice(-6)}</span>
-            <span className="muted small">{a.count}</span>
+            <span className="story-count">{a.count}</span>
           </button>
         ))}
         {!authors.length && !loading ? <p className="muted small">No stories logged yet. “Check now” reads TikTok&rsquo;s stories bar.</p> : null}
@@ -198,7 +198,9 @@ function StoryViewer({ items, start, onClose }: { items: StoryItem[]; start: num
       <button className="story-viewer-close" onClick={onClose} title="Close">
         <Icon name="close" size={22} />
       </button>
-      <button className="story-viewer-side left" onClick={prev} aria-label="Previous" />
+      <button className="story-viewer-side left" onClick={prev} aria-label="Previous" disabled={at === 0}>
+        <span aria-hidden="true">‹</span>
+      </button>
       <div className="story-viewer-body">
         <div className="story-viewer-head">
           <b>@{story.username ?? story.userId.slice(-6)}</b>
@@ -216,20 +218,38 @@ function StoryViewer({ items, start, onClose }: { items: StoryItem[]; start: num
         )}
         <div className="story-viewer-foot muted small">
           {at + 1} / {items.length}
-          {story.expiresAt ? ` · expired on TikTok ${when(story.expiresAt)}` : ''}
+          {story.expiresAt ? ` · expires ${until(story.expiresAt)}` : ''}
         </div>
       </div>
-      <button className="story-viewer-side right" onClick={next} aria-label="Next" />
+      <button className="story-viewer-side right" onClick={next} aria-label="Next" disabled={at === items.length - 1}>
+        <span aria-hidden="true">›</span>
+      </button>
     </div>
   );
 }
 
+/** "7 min ago" / "2 h ago" / "12 Oct" — for a time that already passed. */
 function when(ts: number | null | undefined): string {
   if (!ts) return '';
   const d = new Date(ts);
   const mins = Math.round((Date.now() - ts) / 60_000);
-  if (mins >= 0 && mins < 60) return `${mins} min ago`;
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours} h ago`;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+/** "in 12 min" / "in 3 h" / "in 2 days" — `nextCheckAt` and `expiresAt` are in the future, and "next -0 h ago" reads
+ *  as broken. Falls back to [when] once the moment has passed. */
+function until(ts: number | null | undefined): string {
+  if (!ts) return '';
+  const secs = Math.round((ts - Date.now()) / 1000);
+  if (secs <= 0) return when(ts);
+  if (secs < 60) return 'in a moment';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `in ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `in ${hours} h`;
+  return `in ${Math.round(hours / 24)} d`;
 }

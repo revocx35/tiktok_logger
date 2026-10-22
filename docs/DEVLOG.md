@@ -1,5 +1,43 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.9.6: the Stories page rendered half unstyled
+
+Owner: "the ui of the stories page is broken".
+
+The page was ported from insta_logger with its class names changed, and `styles.css` kept the parent project's:
+`story-viewer-body` vs `story-stage`, `story-tile-meta` vs `story-meta`, `story-tile-badge`, `story-tile-pending`,
+`story-viewer-head/foot/close/side/missing` and `story-initial` had **no rule at all**, `.story-author.active` did not
+match `.on`, and `.page-actions` / `.page-more` did not exist. What the owner saw: the full-screen viewer had no stage
+(the photo sat at its natural size in the middle of the overlay, the close button was a bare browser button at the top,
+the ← / → were empty 16 px boxes), the avatars rendered at their natural 200px+ size over the account row and the
+first tiles, the tiles had no @name/time caption, and `next ${when(nextCheckAt)}` printed "next 0 h ago" for a time in
+the future.
+
+Read from the deployed artifact first, not from the repo: the app image's JS bundle contains `story-viewer-body` while
+its CSS only has `story-stage` — the mismatch was live, not a stale checkout. Then the real component + the real
+`styles.css` were rendered in a local Chromium against a mock `/api/stories*` (desktop 1280×900 and phone 390×844,
+grid and viewer) to see and measure it before and after (`.story-viewer-body` was `position: static`, 16×17).
+
+* The stylesheet now uses the markup's names; the viewer stage is `min(100vw − 12px, 92vh × 9/16)` wide so a phone
+  never gets a stage wider than the screen (the old height-first box overflowed sideways at 390 px).
+* Avatars are 58×58 at `top/left: 3px` inside the 64 px gradient ring — fixed sizes, because a replaced element with
+  an auto width keeps its intrinsic size and drops the over-constrained `right`, which is how a 360×640 avatar became
+  a 364×644 ellipse over the row.
+* Story counts are the badge `.story-count`; the header is `page-head row between wrap`, so "Check now" sits on the
+  title row on a phone as well; the viewer gained a real close button, footer ("2 / 12 · expires in 57 min"), disabled
+  arrows at the ends, and text shadows so white text stays readable over a bright photo.
+* `until()` for future times: "next in 18 min", "expires in 57 min" (was "next 0 h ago", "-1 h ago").
+* Settings → Logging's story picker got its row avatars sized (28 px) — same bug, the `img` had no rule.
+* Dead rules removed (`.story-stage`, `.story-meta`, `.story-badge`, `.story-missing`, `.story-nav`, `.story-head`,
+  `.story-ring.all`, `.story-picker-list`, `.story-pick-name`).
+
+New guard `web/src/pages/storiesCss.test.ts` (node env, reads the sources): every `story-*`/`page-*` class in
+`className=` must have a rule, and every `story-*` rule must be used by some markup. Against the previous
+`styles.css` it reports exactly the 12 classes that were missing — a type-check and a build cannot see this, which is
+how it shipped.
+
+Tests: web 12 (2 new), typecheck + build; server 214 unchanged.
+
 ## 2026-10-22 — v1.9.0: reactions, replies and video cards through the IM protocol
 
 Owner: "add reactions support … look at TikTok's message UI and get feature parity … sending videos shows up as a link,
