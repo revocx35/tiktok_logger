@@ -161,6 +161,44 @@ try {
   const after = repo.messageIdsBetween(CHAT, 0, Date.now()).length;
   check('only the unsent message left the live log', after === before - 1, `before=${before} after=${after}`);
 
+  /* ------------------------------------------------------------------ feed */
+  // Same service, second tab: the feed must not disturb the messages tab.
+  const feedFirst = await service.feed.current();
+  check('the feed opens on the first video', feedFirst?.id === fake.feed[0]!.id, JSON.stringify(feedFirst?.id));
+  check('the feed video is served through an app reference', /^\/api\/feed\/media\/[0-9a-f]{24}$/.test(feedFirst?.video?.src ?? ''), JSON.stringify(feedFirst?.video?.src));
+  const feedNext = await service.feed.step('next');
+  check('the feed moves to the next video', feedNext.id === fake.feed[1]!.id, JSON.stringify(feedNext.id));
+  const unliked = await service.feed.like(feedNext.id, false);
+  check('un-liking goes through TikTok\'s own control', unliked.liked === false, JSON.stringify(unliked));
+  const back = await service.feed.step('prev');
+  check('the feed goes back', back.id === fake.feed[0]!.id, JSON.stringify(back.id));
+  const feedComments = await service.feed.comments(back.id);
+  check('comments are read (with a reply)', feedComments.length === 2 && feedComments[1]!.replies.length === 1, JSON.stringify(feedComments.map((c) => [c.text, c.replies.length])));
+  const postedComments = await service.feed.comment(back.id, 'comment from the service check');
+  check('a comment is posted', postedComments.some((c) => c.text === 'comment from the service check'), JSON.stringify(postedComments.map((c) => c.text)));
+
+  // The video itself: streamed through the browser into a buffer.
+  const src = back.video?.src ?? '';
+  const ref = src.split('/').pop() ?? '';
+  const chunks: Buffer[] = [];
+  const media = await service.feed.streamMedia(ref, async (c) => {
+    chunks.push(c);
+  });
+  const bytes = Buffer.concat(chunks);
+  check('the feed video streams through the browser', bytes.length > 0 && !!media.mime, `${bytes.length} bytes, ${media.mime}`);
+  await service.feed.closeComments();
+
+  // The messages tab must still be logging after all that.
+  const msgsBefore = repo.messageIdsBetween(CHAT, 0, Date.now()).length;
+  fake.receive(CHAT, 'still logging after the feed');
+  await page.evaluate(async () => {
+    // The fake page polls nothing; a reload is what a returning tab does, and the reconcile picks the message up.
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await sleep(400);
+  await (service as unknown as { reconcileOnce: () => Promise<void> }).reconcileOnce();
+  check('the messages tab still logs after using the feed', repo.messageIdsBetween(CHAT, 0, Date.now()).length >= msgsBefore);
+
   await service.stop();
 } finally {
   await browser.close();

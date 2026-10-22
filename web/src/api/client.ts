@@ -30,6 +30,9 @@ import type {
   TtStatus,
   TtDiagnostics,
   PageProbe,
+  FeedItem,
+  FeedComment,
+  FeedCommentPage,
 } from '../../../shared/api';
 
 export class ApiError extends Error {
@@ -142,6 +145,13 @@ export const api = {
   vncCredentials: () => request<VncCredentials>('GET', '/api/vnc/credentials'),
 
   chats: () => request<ChatSummary[]>('GET', '/api/chats'),
+
+  feed: () => request<{ item: FeedItem | null }>('GET', '/api/feed'),
+  feedStep: (dir: 'next' | 'prev') => request<{ item: FeedItem }>('POST', '/api/feed/step', { dir }),
+  feedLike: (id: string, like: boolean) => request<{ liked: boolean }>('POST', `/api/feed/${enc(id)}/like`, { like }),
+  feedComments: (id: string) => request<FeedCommentPage>('GET', `/api/feed/${enc(id)}/comments`),
+  feedComment: (id: string, text: string) => request<FeedCommentPage>('POST', `/api/feed/${enc(id)}/comment`, { text }),
+  feedCloseComments: () => request<{ ok: true }>('POST', '/api/feed/comments/close'),
   messages: (chatId: string, before?: string | null, limit = 60) =>
     request<MessagePage>('GET', `/api/chats/${enc(chatId)}/messages?limit=${limit}${before ? `&before=${enc(before)}` : ''}`),
   messagesAfter: (chatId: string, after: string, limit = 100) =>

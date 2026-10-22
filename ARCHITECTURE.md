@@ -15,6 +15,11 @@ The web UI looks like a messenger: conversation list, chat view, search, an "Uns
 browser ("TikTok" in the menu) where the owner logs in and answers TikTok's checks. It can also **send** text, photos,
 videos and audio as the account, by driving TikTok's own composer.
 
+The **Feed** section (`/feed`) browses TikTok's For You feed through the same browser, in its own tab: one video at a
+time with its author, caption and stats, TikTok's own like button, its comments (read and posted) and "send this video"
+into one of the logged chats as the canonical link. Videos are streamed through the browser while they play; nothing of
+the feed is stored (it is browsing, not the log).
+
 **Multi-user:** the first account is the admin; the admin creates more users in the web UI (name + temporary password)
 and can give each their own port. Every user is a separate tenant: own TikTok login (own Chromium, own session), own
 encrypted database, own keys, own unix user. A user's data is invisible to the admin and to everyone else.
@@ -143,6 +148,8 @@ server/src/
     chromium.ts       client for this tenant's browser through the manager
     browser.ts        one TikTok tab: picking it, classifying its URL, closing the others
     download.ts       media downloads through the browser (Network.loadNetworkResource)
+    feed.ts           the For You feed: its own tab, current/next/previous, like, comments, video streaming
+    feedAgent.ts      the in-page agent for the feed (item, controls, comments panel) + feed selector candidates
 ```
 
 ### State machine (`service.ts`)
@@ -224,18 +231,46 @@ server/src/
   changes often; the API answers `not_supported` with a clear message and the UI hides those actions. Edit does not
   exist on TikTok at all.
 
+### Feed (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
+
+* **Its own tab.** The feed is opened in a second tab (`/<origin>/foryou`) on first use, so the messages tab keeps its
+  position, its stream socket and its "who is on screen" state. The tab is created, reused and closed with the
+  connection (`TtService.feedPage()`); it never replaces the messages tab.
+* **Reading.** The agent finds the item container/`video` under the middle of the viewport (candidates: TikTok's
+  `data-e2e` names, then layout heuristics), and reads the id from the `/video/<id>` link, the author from the `/@name`
+  link, the caption, the music line and the like/comment/share/play counts (formatted counts like `1.2K` are parsed).
+  The like state comes from the like control's `aria-pressed`/class.
+* **Moving.** Next/previous click TikTok's own arrows; when those are missing it sends the arrow keys to the page. The
+  service waits until the visible item id really changed (the feed animates), then waits for the video element to have
+  a source.
+* **Liking** clicks the like control and polls the page until the state matches what was asked; a feed that moved on
+  (different id on screen) is a 409, never a like on the wrong video.
+* **Comments** open TikTok's panel, read the rows (and their replies), and post by filling the box and pressing the
+  post control (Enter as a fallback). The service confirms the new comment appears before answering.
+* **Video** is streamed through the browser (`Network.loadNetworkResource`, no cookies) to the client by
+  `/api/feed/media/<ref>`; the ref is a random, short-lived handle (30 min, 64 entries) to the signed CDN URL, so TikTok
+  links never reach the browser. There is no Range support: the whole body is sent and Chrome plays the buffered
+  progressive MP4 (seeking inside what is buffered works; a Range request is refused with 409).
+* **Sharing** is the UI sending the canonical `https://www.tiktok.com/@user/video/<id>` into a chat through the normal
+  send path — the log then contains it like any other link message.
+* Nothing from the feed is stored; posting a comment adds one audit line (`feed_comment`, no content).
+
 ## 5. Web UI — `web/`
 
 React 19 + Vite + TypeScript SPA, built into the server's static assets. No CDN, no external fonts, no inline scripts
 (strict CSP). `@novnc/novnc` for the TikTok screen, `qrcode` for TOTP enrollment.
 
-Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (chats), `/chat/:chatId`, `/deleted`
-("Unsent"), `/search`, `/tiktok`, `/settings`, `/admin`. A route guard uses `GET /api/state`.
+Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (chats), `/chat/:chatId`, `/feed`
+(For You), `/deleted` ("Unsent"), `/search`, `/tiktok`, `/settings`, `/admin`. A route guard uses `GET /api/state`.
 
 Chat view: date separators; sender names in groups; text rendered as text (links and @mentions only, never HTML);
 quoted replies; media grid with lightbox, video player, audio player; shared-post cards with a link out; select
 photos/videos → one ZIP; infinite scroll; SSE live updates; per-chat and global search; composer with text, photo/video/
 audio and voice recording (MP4 or Ogg/Opus). Light and dark themes, single pane under 900 px.
+
+Feed (`pages/Feed.tsx`): a full-height stage with the video (muted by default, click to unmute), author/caption/music and
+stats, a rail with like / comments / send / mute / open-on-TikTok, up/down arrows and `↑`/`↓` or `J`/`K`, a comments
+panel with replies and a composer, and a chat picker for "send this video".
 
 Settings → Logging holds the media/history limits, session refresh and the re-check interval; Settings → TikTok holds
 the connection, the session paste panel and **Diagnostics** ("Check what is being read" / "Show the page's structure"),
@@ -370,6 +405,11 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | GET/POST | /api/tt/diagnostics · /api/tt/probe | ✓ | capture counters and recent IM paths · the page's structure |
 | POST | /api/onboarding/complete | ✓ | requires state ready/syncing |
 | GET / WS | /api/vnc/credentials · /api/vnc | ✓ | noVNC password · bridge to the browser's screen |
+| GET | /api/feed | ✓ | `{item}`: the video in view (`FeedItem`, media as app URLs) |
+| POST | /api/feed/step | ✓ | `{dir: next\|prev}` → `{item}` |
+| POST | /api/feed/:id/like | ✓ | `{like}` → `{liked}` (TikTok's own control) |
+| GET · POST | /api/feed/:id/comments · /api/feed/:id/comment | ✓ | `{comments}` · posts `{text}` (≤150) |
+| GET | /api/feed/media/:ref | ✓ | the video/poster/avatar, streamed through the browser (no Range) |
 | GET | /api/chats | ✓ | `ChatSummary[]` |
 | GET | /api/chats/:chatId/messages?before= · /messages/around/:messageId · /messages/after?after= | ✓ | `MessagePage` |
 | GET | /api/messages/:messageId · /edits | ✓ | one message · edit history |
@@ -396,7 +436,7 @@ max 2000), `RECONCILE_MINUTES` (10), `SCREEN`, `LOG_LEVEL`, `TRUST_PROXY`, `TZ`.
 chromium; `VNC_PASSWORD` is the fallback), `MAX_USERS` (10), `EXTRA_PORTS` (8101-8110), `EXTRA_BIND` (127.0.0.1),
 `APP_MEM_LIMIT`, `CHROMIUM_MEM_LIMIT`, `CHROMIUM_SHM`. TikTok: `TT_REQUEST_GAP_MS` (1500), `TT_ENABLED` (tests),
 `TT_WEB_ORIGIN` (only the fake end-to-end test changes it; a startup warning is logged), `TT_DOM_SELECTORS` (extra CSS
-selectors as JSON, extending `server/src/tt/dom.ts`). Per worker (set by the supervisor): `SOCKET_PATH`,
+selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent.ts`). Per worker (set by the supervisor): `SOCKET_PATH`,
 `INTERNAL_TOKEN`, `TENANT_ID`, `CHROMIUM_URL`, `CHROMIUM_INSTANCE`, `CHROMIUM_TOKEN`.
 
 ## 10. Testing
@@ -411,10 +451,12 @@ selectors as JSON, extending `server/src/tt/dom.ts`). Per worker (set by the sup
   tunnel), also run in the image build.
 * `scripts/dev/dom-check.mts` (dev, needs a Chromium): the page agent against the fake TikTok, with and without
   `data-e2e` attributes — conversation list, message rows, own-message detection, photo/video rows, opening by name,
-  composer, send, file attach, and the watcher's capture of IM answers.
+  composer, send, file attach, the watcher's capture of IM answers, and the feed agent (item fields, stats parsing,
+  next/previous, like, comments with a reply, posting a comment).
 * `scripts/dev/service-check.mts` (dev, needs a Chromium): the **real** `TtService` against the fake TikTok with a real
   encrypted database — ready state, three conversations imported, decrypted bodies, sending, a message arriving as a
-  protobuf frame, and an unsent message flagged by a re-check.
+  protobuf frame, an unsent message flagged by a re-check, and the feed (open, next/previous, un-like, comments,
+  posting, video streaming) — then that the messages tab still logs afterwards.
 * `scripts/smoke.sh`: the containers — TLS (and no SNI), headers, cookies, CSRF/Origin, signup, the real tiktok.com
   login page in the locked-down Chromium (state `login`), VNC handshake, no app egress, the Chromium sandbox, the admin
   API, a created user, `/internal` unreachable from outside, one unix user per process.

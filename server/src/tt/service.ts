@@ -10,6 +10,7 @@ import type { SessionCookie } from './cookies.js';
 import { DEFAULT_SELECTORS, DomAgent, mergeSelectors, type DomSelectors } from './dom.js';
 import type { ChatDriver } from './driver.js';
 import { BrowserDownloader } from './download.js';
+import { FeedService } from './feed.js';
 import { Ingest, MediaSources } from './ingest.js';
 import { lookAtTab, nextLoginStep, setSessionCookies, steerTab } from './loginwatch.js';
 import { MediaQueue } from './media.js';
@@ -65,6 +66,9 @@ export class TtService implements TtController, ChatDriver {
   readonly ingest: Ingest;
   readonly sender: TtSender;
   readonly sync: Sync;
+  readonly feed: FeedService;
+  /** The For You tab (created on demand, kept for the session; never the messages tab). */
+  private feedPageRef: Page | null = null;
   private selectors: DomSelectors;
 
   /**
@@ -84,6 +88,7 @@ export class TtService implements TtController, ChatDriver {
     });
     this.ingest = new Ingest(ctx, ctx.events, this.sources, this.media);
     this.sender = new Sender(ctx, this.ingest, this);
+    this.feed = new FeedService(ctx, { feedPage: () => this.feedPage() });
     this.sync = new Sync(ctx, {
       threads: () => this.readThreads(),
       openChat: (id) => this.ensureChatOpen(id),
@@ -433,6 +438,10 @@ export class TtService implements TtController, ChatDriver {
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
     this.media.pause();
+    await this.feed.reset().catch(() => undefined);
+    const feedPage = this.feedPageRef;
+    this.feedPageRef = null;
+    if (feedPage && !feedPage.isClosed()) await feedPage.close().catch(() => undefined);
     await this.run(async () => {
       await this.watcher?.detach().catch(() => undefined);
       await this.downloaderRef?.detach().catch(() => undefined);
@@ -631,6 +640,24 @@ export class TtService implements TtController, ChatDriver {
   }
 
   /* ------------------------------------------------------------- page access */
+
+  /**
+   * The tab the feed is browsed in. Separate from the messages tab on purpose: the messages tab must stay on the
+   * inbox to keep the log complete (and to keep TikTok's stream socket alive there).
+   */
+  async feedPage(): Promise<{ page: Page; origin: string } | null> {
+    if (this.state !== 'ready' || !this.browser) return null;
+    const origin = this.ctx.config.ttWebOrigin;
+    const existing = this.feedPageRef;
+    if (existing && !existing.isClosed()) return { page: existing, origin };
+    const page = await this.browser.newPage();
+    this.feedPageRef = page;
+    page.on('close', () => {
+      if (this.feedPageRef === page) this.feedPageRef = null;
+    });
+    await page.goto(`${origin}/foryou`, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
+    return { page, origin };
+  }
 
   agent(): DomAgent {
     const a = this.agentRef;

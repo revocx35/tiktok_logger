@@ -93,6 +93,208 @@ export function sampleConversations(me = { uid: '7000000000000000001', nickname:
   return convos;
 }
 
+
+/** Three sample videos for the For You feed (one in view at a time, like TikTok). */
+export interface FakeFeedItem {
+  id: string;
+  username: string;
+  caption: string;
+  music: string;
+  likes: number;
+  comments: number;
+  shares: number;
+  plays: number;
+  liked: boolean;
+  commentsList: { id: string; username: string; text: string; likes: number; replies: { id: string; username: string; text: string; likes: number }[] }[];
+}
+
+export function sampleFeed(): FakeFeedItem[] {
+  return [
+    {
+      id: '7412345678901234567',
+      username: 'ali.veli',
+      caption: 'first video caption #test',
+      music: 'original sound - ali.veli',
+      likes: 1200,
+      comments: 2,
+      shares: 34,
+      plays: 34000,
+      liked: false,
+      commentsList: [
+        { id: 'c1', username: 'ayse', text: 'nice one', likes: 12, replies: [] },
+        { id: 'c2', username: 'mehmet', text: 'where is this?', likes: 3, replies: [{ id: 'c2r1', username: 'ali.veli', text: 'istanbul', likes: 1 }] },
+      ],
+    },
+    {
+      id: '7412345678901234568',
+      username: 'ayse',
+      caption: 'second video',
+      music: 'some song - artist',
+      likes: 98,
+      comments: 0,
+      shares: 1,
+      plays: 1500,
+      liked: true,
+      commentsList: [],
+    },
+    {
+      id: '7412345678901234569',
+      username: 'study.group',
+      caption: 'third video with a longer caption to check wrapping in the overlay',
+      music: 'lofi beats',
+      likes: 5500,
+      comments: 0,
+      shares: 210,
+      plays: 120000,
+      liked: false,
+      commentsList: [],
+    },
+  ];
+}
+
+function feedHtml(): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>For You — TikTok</title>
+<style>
+  * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+  body { margin: 0; background: #000; color: #fff; }
+  #feed { height: 100vh; overflow-y: auto; scroll-snap-type: y mandatory; }
+  .item { height: 100vh; scroll-snap-align: start; position: relative; display: flex; align-items: center; justify-content: center; }
+  video { max-height: 100%; max-width: 100%; background: #111; }
+  .meta { position: absolute; left: 20px; bottom: 24px; max-width: 55%; text-shadow: 0 1px 2px #000; }
+  .meta a { color: #fff; font-weight: 700; text-decoration: none; }
+  .meta p { margin: 4px 0; }
+  .rail { position: absolute; right: 18px; bottom: 30px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .rail button { background: rgba(30,30,40,.7); color: #fff; border: 0; border-radius: 999px; padding: 10px 8px; min-width: 60px; cursor: pointer; }
+  .rail button[aria-pressed="true"] { color: #fe2c55; }
+  .arrows { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 10px; }
+  .arrows button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(30,30,40,.8); color: #fff; cursor: pointer; }
+  #comments { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; background: #161823; color: #fff; display: none; flex-direction: column; }
+  #comments.open { display: flex; }
+  #comments header { padding: 12px; border-bottom: 1px solid #2a2b38; display: flex; justify-content: space-between; }
+  #clist { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  .comment { margin: 10px 0; }
+  .comment a { color: #25f4ee; text-decoration: none; font-weight: 600; }
+  .comment p { margin: 2px 0; }
+  .reply { margin-left: 18px; border-left: 2px solid #2a2b38; padding-left: 10px; }
+  #cform { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #2a2b38; }
+  #cinput { flex: 1; min-height: 34px; border: 1px solid #2a2b38; border-radius: 8px; padding: 8px; }
+  #cpost { background: #fe2c55; color: #fff; border: 0; border-radius: 8px; padding: 0 14px; }
+</style></head>
+<body>
+<div id="feed"></div>
+<div class="arrows">
+  <button data-e2e="arrow-left" onclick="go(-1)">↑</button>
+  <button data-e2e="arrow-right" onclick="go(1)">↓</button>
+</div>
+<div id="comments">
+  <header><strong>Comments</strong><button data-e2e="comment-close" onclick="closeComments()">✕</button></header>
+  <div id="clist" data-e2e="comment-list"></div>
+  <div id="cform">
+    <div id="cinput" data-e2e="comment-input" contenteditable="true" role="textbox"></div>
+    <button id="cpost" data-e2e="comment-post" onclick="post()">Post</button>
+  </div>
+</div>
+<script>
+let items = [];
+let current = 0;
+
+const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n);
+
+async function load() {
+  const r = await fetch('/api/recommend/item_list/');
+  const j = await r.json();
+  items = j.itemList;
+  render();
+}
+
+function render() {
+  const box = document.getElementById('feed');
+  box.innerHTML = '';
+  items.forEach((it, i) => {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.setAttribute('data-e2e', 'recommend-list-item-container');
+    el.setAttribute('data-item-id', it.id);
+    el.innerHTML =
+      '<video src="/media/' + it.id + '.mp4" poster="/media/' + it.id + '.jpg" loop muted playsinline></video>' +
+      '<div class="meta">' +
+        '<a href="/@' + it.username + '/video/' + it.id + '" data-e2e="browse-username">@' + it.username + '</a>' +
+        '<p data-e2e="browse-video-desc">' + it.caption + '</p>' +
+        '<p data-e2e="browse-music">' + it.music + '</p>' +
+        '<p class="stats"><span data-e2e="video-views">' + fmt(it.plays) + '</span> plays</p>' +
+      '</div>' +
+      '<div class="rail">' +
+        '<button data-e2e="like-icon" aria-pressed="' + (it.liked ? 'true' : 'false') + '" onclick="like(' + i + ')">♥ <strong data-e2e="like-count">' + fmt(it.likes) + '</strong></button>' +
+        '<button data-e2e="comment-icon" onclick="openComments()">💬 <strong data-e2e="comment-count">' + fmt(it.comments) + '</strong></button>' +
+        '<button data-e2e="share-icon">↗ <strong data-e2e="share-count">' + fmt(it.shares) + '</strong></button>' +
+      '</div>';
+    box.appendChild(el);
+  });
+  box.scrollTop = current * window.innerHeight;
+}
+
+function go(dir) {
+  current = Math.max(0, Math.min(items.length - 1, current + dir));
+  const box = document.getElementById('feed');
+  box.scrollTo({ top: current * window.innerHeight, behavior: 'auto' });
+}
+
+async function like(i) {
+  const r = await fetch('/api/feed/like', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: items[i].id }) });
+  const j = await r.json();
+  items[i].liked = j.liked;
+  items[i].likes = j.likes;
+  render();
+}
+
+function currentItem() { return items[current]; }
+
+async function openComments() {
+  document.getElementById('comments').classList.add('open');
+  renderComments();
+}
+
+function closeComments() { document.getElementById('comments').classList.remove('open'); }
+
+function renderComments() {
+  const it = currentItem();
+  const box = document.getElementById('clist');
+  box.innerHTML = '';
+  const add = (c, reply, parent) => {
+    const el = document.createElement('div');
+    el.className = 'comment' + (reply ? ' reply' : '');
+    el.setAttribute('data-e2e', reply ? 'comment-level-2' : 'comment-level-1');
+    el.setAttribute('data-id', c.id);
+    el.innerHTML = '<a href="/@' + c.username + '">@' + c.username + '</a><p>' + c.text + '</p>' +
+      '<span data-e2e="comment-like-count">' + (c.likes || 0) + '</span>';
+    (parent || box).appendChild(el);
+    return el;
+  };
+  for (const c of it.commentsList) {
+    const el = add(c, false, null);
+    for (const r of c.replies || []) add(r, true, el);
+  }
+  if (!it.commentsList.length) box.innerHTML = '<p>No comments yet</p>';
+}
+
+async function post() {
+  const input = document.getElementById('cinput');
+  const text = input.innerText.trim();
+  if (!text) return;
+  const r = await fetch('/api/feed/comment', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: currentItem().id, text }) });
+  const j = await r.json();
+  Object.assign(currentItem(), j);
+  input.innerHTML = '';
+  renderComments();
+  render();
+}
+
+load();
+</script>
+</body></html>`;
+}
+
 function pageHtml(plain: boolean): string {
   // data-e2e attributes are TikTok's own convention; --plain drops them so the structural heuristics are used.
   const e2e = (v: string) => (plain ? '' : ` data-e2e="${v}"`);
@@ -252,6 +454,7 @@ export interface FakeTikTok {
   port: number;
   url: string;
   conversations: FakeConversation[];
+  feed: FakeFeedItem[];
   /** Appends a message as if the peer sent it (used by tests to simulate a live message). */
   receive(conversationId: string, text: string): FakeMessage;
   close(): Promise<void>;
@@ -260,6 +463,7 @@ export interface FakeTikTok {
 export async function startFakeTikTok(opts: FakeTikTokOptions = {}): Promise<FakeTikTok> {
   const me = opts.me ?? { uid: '7000000000000000001', nickname: 'Owner' };
   const conversations = sampleConversations(me);
+  const feed = sampleFeed();
   const html = pageHtml(opts.plain === true);
 
   const server = http.createServer((req, res) => {
@@ -269,6 +473,50 @@ export async function startFakeTikTok(opts: FakeTikTokOptions = {}): Promise<Fak
       res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(s) });
       res.end(s);
     };
+    if (url.pathname === '/foryou') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(feedHtml());
+      return;
+    }
+    if (url.pathname === '/api/recommend/item_list/') {
+      json({ status_code: 0, itemList: feed });
+      return;
+    }
+    if (url.pathname === '/api/feed/like' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (d) => { body += String(d); if (body.length > 1e6) req.destroy(); });
+      req.on('end', () => {
+        let id = '';
+        try { id = (JSON.parse(body) as { id?: string }).id ?? ''; } catch { /* ignore */ }
+        const item = feed.find((f) => f.id === id);
+        if (!item) { json({ status_code: 404 }, 404); return; }
+        item.liked = !item.liked;
+        item.likes += item.liked ? 1 : -1;
+        json({ status_code: 0, liked: item.liked, likes: item.likes });
+      });
+      return;
+    }
+    if (url.pathname === '/api/feed/comment' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (d) => { body += String(d); if (body.length > 1e6) req.destroy(); });
+      req.on('end', () => {
+        let id = '';
+        let text = '';
+        try { const p = JSON.parse(body) as { id?: string; text?: string }; id = p.id ?? ''; text = p.text ?? ''; } catch { /* ignore */ }
+        const item = feed.find((f) => f.id === id);
+        if (!item) { json({ status_code: 404 }, 404); return; }
+        item.commentsList.push({ id: 'mine-' + Date.now(), username: 'owner', text, likes: 0, replies: [] });
+        item.comments = item.commentsList.length;
+        json({ status_code: 0, commentsList: item.commentsList, comments: item.comments });
+      });
+      return;
+    }
+    if (url.pathname.startsWith('/media/')) {
+      // Not a real video: enough for the page and the capture layer (the agent only needs the source URL).
+      res.writeHead(200, { 'content-type': url.pathname.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4', 'cache-control': 'no-store' });
+      res.end(Buffer.from(url.pathname.endsWith('.jpg') ? [0xff, 0xd8, 0xff, 0xd9] : [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]));
+      return;
+    }
     if (url.pathname.startsWith('/messages') || url.pathname === '/login') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
@@ -341,6 +589,7 @@ export async function startFakeTikTok(opts: FakeTikTokOptions = {}): Promise<Fak
     port,
     url: `http://127.0.0.1:${port}`,
     conversations,
+    feed,
     receive(conversationId: string, text: string): FakeMessage {
       const c = conversations.find((x) => x.conversation_id === conversationId);
       if (!c) throw new Error('no such conversation');

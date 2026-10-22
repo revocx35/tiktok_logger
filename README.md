@@ -27,9 +27,10 @@ and stores it encrypted on your disk. You can also send messages from the web UI
 | Notices | unsent messages, TikTok's "message deleted" lines, edited/deleted media |
 | Sends | text, photos, videos, audio (from the composer), with "seen" only when you reply (configurable) |
 | Shows | conversation list, chat view with search, an "Unsent" feed, one ZIP per selection of media |
+| Feed | browses TikTok's For You, likes/unlikes, reads and posts comments, sends a video's link into a chat |
 | Users | admin + up to `MAX_USERS`, each with their own TikTok account, keys and browser; separate ports possible |
 | Logs in | on the built-in screen (noVNC), or by pasting a session from your own browser |
-| Does not | calls, the feed/For You, posting videos, comments, or several TikTok accounts in one user |
+| Does not | calls, posting videos/going live, following or messaging strangers, or several TikTok accounts in one user |
 
 ## Requirements
 
@@ -86,6 +87,14 @@ tiktok.com ⇄ chromium container (one real browser per user, VNC screen) ⇄ ap
 The app never signs or replays a TikTok request: TikTok's own client does all of that, and tiktok_logger only reads what
 that client shows and receives. Sending works the same way — it fills TikTok's message box and presses send, like a
 person would. See `ARCHITECTURE.md` for the long version, the security model and the limits.
+
+## The Feed
+
+**Feed** in the menu shows TikTok's For You through the server's browser: one video at a time, its author, caption and
+stats, with TikTok's own like button, the comments (read and posted) and **Send**, which puts the video's link into one
+of your logged chats. `↑`/`↓` or `J`/`K` move through the feed, a click on the video toggles sound. The videos are
+streamed through the server (TikTok's signed links never reach your browser) and nothing of the feed is stored on disk —
+it is browsing, not logging. If the feed cannot be read, Settings → TikTok → Diagnostics shows why.
 
 ## Settings worth knowing
 

@@ -326,6 +326,58 @@ export interface AuditEntry { id: number; ts: number; event: string; ip: string 
 
 export interface WipeRequest { password: string; totp?: string }
 
+/* -------------------------------------------------------------------- feed */
+// TikTok's For You feed, browsed through the server's browser (nothing is stored).
+// `video.src` / `poster` / `author.avatar` are app URLs (/api/feed/media/<ref>), never TikTok's.
+
+export interface FeedAuthor {
+  username: string | null;
+  name: string | null;
+  avatar: string | null;
+}
+
+export interface FeedStats {
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  plays: number | null;
+}
+
+export interface FeedVideo {
+  /** App URL streaming the video through the browser, or null when TikTok rendered no source. */
+  src: string | null;
+  poster: string | null;
+  muted: boolean;
+  playing: boolean;
+}
+
+export interface FeedItem {
+  /** TikTok item id (numeric), or a synthetic id when the page did not show one. */
+  id: string;
+  /** Canonical https://www.tiktok.com/@user/video/<id> — what a chat message links to. */
+  url: string;
+  author: FeedAuthor;
+  caption: string | null;
+  music: string | null;
+  stats: FeedStats;
+  /** The owner's like on this video, as TikTok shows it. */
+  liked: boolean;
+  video: FeedVideo | null;
+}
+
+export interface FeedComment {
+  id: string;
+  author: { username: string | null; name: string | null };
+  text: string;
+  likes: number | null;
+  replies: FeedComment[];
+}
+
+export interface FeedStepRequest { dir: 'next' | 'prev' }
+export interface FeedLikeRequest { like: boolean }
+export interface FeedCommentRequest { text: string }
+export interface FeedCommentPage { comments: FeedComment[] }
+
 /* --------------------------------------------------------- user management */
 // Served by the gateway under /api/admin/* (admin only). Nothing here exposes a user's data: the admin sees names,
 // the port each user signs in on and whether their TikTok is linked, never chats, messages or contacts.

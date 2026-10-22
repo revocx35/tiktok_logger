@@ -14,6 +14,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const puppeteer = requireFromServer('puppeteer') as typeof import('puppeteer');
 import { DomAgent, mergeSelectors } from '../../server/src/tt/dom.js';
+import { FeedAgent, mergeFeedSelectors } from '../../server/src/tt/feedAgent.js';
 import { domRowToMessage, domThreadToThread, mapMessage } from '../../server/src/tt/mapper.js';
 import { Watcher } from '../../server/src/tt/watcher.js';
 import { startFakeTikTok } from './fake-tiktok.mts';
@@ -125,6 +126,60 @@ try {
     const mappedApi = answer.data.messages.map((m) => mapMessage(m, null, { meId: ME })).filter((m) => m !== null);
     check('IM answers map to messages', mappedApi.length === answer.data.messages.length, `${mappedApi.length}/${answer.data.messages.length}`);
     check('mapped text and ids are usable', mappedApi.every((m) => !!m!.id && !!m!.threadId));
+
+    await page.close();
+    await fake.close();
+  }
+
+  /* ---------------------------------------------------------------- feed */
+  {
+    const fake = await startFakeTikTok({});
+    console.log(`\n== fake TikTok feed at ${fake.url}/foryou`);
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1100, height: 800 });
+    await page.goto(`${fake.url}/foryou`, { waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 600));
+    const agent = new FeedAgent(page, mergeFeedSelectors(null));
+    await agent.install();
+
+    const first = await agent.current();
+    check('the first video is read', first?.id === fake.feed[0]!.id, JSON.stringify(first));
+    check('author, caption and music are read', first?.author.username === fake.feed[0]!.username && first?.caption === fake.feed[0]!.caption && !!first?.music, JSON.stringify(first));
+    check('stats are parsed (1.2K likes, 34K plays)', first?.stats.likes === 1200 && first?.stats.plays === 34000, JSON.stringify(first?.stats));
+    check('the like state is read', first?.liked === false);
+    check('the video source is read', !!first?.video?.src && /\/media\//.test(first.video.src), JSON.stringify(first?.video));
+
+    await agent.step('next');
+    await new Promise((r) => setTimeout(r, 400));
+    const second = await agent.current();
+    check('next moves to the second video', second?.id === fake.feed[1]!.id, JSON.stringify(second?.id));
+    check('the second video is marked liked', second?.liked === true);
+
+    await agent.like();
+    await new Promise((r) => setTimeout(r, 400));
+    const afterLike = await agent.current();
+    check('liking toggles the state', afterLike?.liked === false, JSON.stringify(afterLike?.liked));
+
+    await agent.step('prev');
+    await new Promise((r) => setTimeout(r, 400));
+    const back = await agent.current();
+    check('previous goes back', back?.id === fake.feed[0]!.id, JSON.stringify(back?.id));
+
+    await agent.openComments();
+    await new Promise((r) => setTimeout(r, 400));
+    const panel = await agent.comments();
+    check('comments open', panel.open === true);
+    check('comments are read with their replies', panel.comments.length === 2 && panel.comments[1]?.replies.length === 1, JSON.stringify(panel.comments.map((c) => [c.text, c.replies.length])));
+    check('a comment has its author', panel.comments[0]?.author.username === 'ayse');
+
+    const posted = await agent.postComment('hello from the check');
+    await new Promise((r) => setTimeout(r, 500));
+    const afterPost = await agent.comments();
+    check('a comment can be posted', posted.ok && afterPost.comments.some((c) => c.text === 'hello from the check'), JSON.stringify(afterPost.comments.map((c) => c.text)));
+
+    await agent.closeComments();
+    await new Promise((r) => setTimeout(r, 300));
+    check('comments close', (await agent.comments()).open === false);
 
     await page.close();
     await fake.close();

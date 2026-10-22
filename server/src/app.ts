@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { registerAdminRoutes } from './api/admin.js';
 import { registerChatRoutes } from './api/chats.js';
 import { registerEventRoutes } from './api/events.js';
+import { registerFeedRoutes } from './api/feed.js';
 import { registerInternalRoutes } from './api/internal.js';
 import { registerMediaRoutes } from './api/media.js';
 import { registerSendRoutes } from './api/send.js';
@@ -38,6 +39,7 @@ export async function createApp(
   registerInternalRoutes(app, ctx, auth);
   registerChatRoutes(app, ctx);
   registerMediaRoutes(app, ctx);
+  registerFeedRoutes(app, ctx);
   registerSendRoutes(app, ctx);
   registerEventRoutes(app, ctx);
   registerAdminRoutes(app, ctx);

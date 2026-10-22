@@ -72,3 +72,12 @@ export function colorFor(id: string): string {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
   return SENDER_COLORS[Math.abs(h) % SENDER_COLORS.length]!;
 }
+
+/** Compact counts for the feed (1.2K, 3.4M …); null shows as "—". */
+export function formatCount(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}K`;
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0).replace(/\.0$/, '')}M`;
+  return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`;
+}

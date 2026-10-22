@@ -1,5 +1,23 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.1.0: the Feed
+
+Added TikTok's For You feed (`/feed`) as its own tab in the same browser: read the video in view (id, author, caption,
+music, stats, like state), next/previous through TikTok's arrows (arrow keys as fallback), like/unlike through TikTok's
+own control with confirmation, comments (read with replies, post through the composer), "send this video" into a chat,
+and the video streamed through the browser to the client.
+
+Design notes: the feed never replaces the messages tab (separate page, closed with the connection); signed CDN URLs are
+replaced by 30-minute refs; the stream is full-body (no Range; Chrome plays the progressive MP4 and a Range request is
+refused rather than pretending); the like is refused (409) when the feed has moved on, so a like never lands on the
+wrong video; nothing of the feed is stored, and posting a comment is the only write (one audit line, no content).
+
+Verified here: fake TikTok gained a feed page + `/api/recommend/item_list/` + like/comment endpoints; dom-check gained
+12 feed checks (all pass), service-check runs the real FeedService (open, next/previous, un-like, comments with a reply,
+posting, streaming) and then proves the messages tab still logs; 124 server tests and the web build stay green.
+Real TikTok's For You page is, like the messages page, to be confirmed on the owner's first live session.
+
+
 Short record of the decisions and the verification behind them. Keep it terse; it is for the next session, not for
 users.
 

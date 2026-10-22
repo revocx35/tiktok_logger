@@ -1,4 +1,4 @@
-import type { TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
+import type { FeedComment, FeedItem, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
 import type { Config } from './config.js';
 import type { SessionCookie } from './tt/cookies.js';
 import { Errors } from './errors.js';
@@ -19,6 +19,18 @@ export interface TtSender {
   unsend(messageId: string): Promise<void>;
   edit(messageId: string, text: string): Promise<void>;
   markRead(chatId: string): Promise<void>;
+}
+
+/** The For You feed (its own tab; browsing only, nothing is stored). */
+export interface TtFeed {
+  current(): Promise<FeedItem | null>;
+  step(dir: 'next' | 'prev'): Promise<FeedItem>;
+  like(id: string, want: boolean): Promise<{ liked: boolean }>;
+  comments(id: string): Promise<FeedComment[]>;
+  comment(id: string, text: string): Promise<FeedComment[]>;
+  closeComments(): Promise<void>;
+  mimeOf(ref: string): string | null;
+  streamMedia(ref: string, write: (chunk: Buffer) => Promise<void>): Promise<{ mime: string | null; size: number }>;
 }
 
 /** Control surface of the TikTok integration, used by the HTTP layer. */
@@ -42,6 +54,7 @@ export interface TtController {
   probePage(): Promise<PageProbe | null>;
   stop(): Promise<void>;
   readonly sender: TtSender;
+  readonly feed: TtFeed;
 }
 
 export interface TtDiagnostics {
@@ -104,6 +117,16 @@ const notConnected = async (): Promise<never> => {
 
 export class NullTt implements TtController {
   private readonly since = Date.now();
+  readonly feed: TtFeed = {
+    current: async () => null,
+    step: notConnected,
+    like: notConnected,
+    comments: notConnected,
+    comment: notConnected,
+    closeComments: async () => undefined,
+    mimeOf: () => null,
+    streamMedia: notConnected,
+  };
   readonly sender: TtSender = {
     sendText: notConnected,
     sendMedia: notConnected,
