@@ -134,30 +134,70 @@ server/src/
   http/               server factory, security headers/CSP, static web UI, error handler, ZIP streaming
   vnc/                authenticated WebSocket ↔ the tenant's x11vnc, through the manager's tunnel
   tt/
-    service.ts        the integration: state machine, connect/teardown, loops (poll, re-check, session refresh)
-    dom.ts            the in-page agent: conversation list, message rows, composer, file input; selector candidates
+    service.ts        the integration: state machine, connect/teardown, loops, protocol vs page path, story timer
+    im/               TikTok's IM protocol, run inside the tab: wire.ts (protobuf codec), proto.ts (the messages it
+                      needs), transport.ts (fetch/evaluate bridge), engine.ts (import, catch-up, unsend, send, profiles)
+    web/api.ts        TikTok's www web API from the tab (fetch hook signs it): feed, comments, likes, stories
+    feedApi.ts        the feed on top of that web API (list, swipe = index move, media cache); feed.ts/feedAgent.ts
+                      are the page-driving fallback
+    stories.ts        story logging: stories-bar + batch parsers and StoryLogger (timer, media, retention sweep)
+    dom.ts            the in-page agent for the messages page: conversation list, rows, composer, file input
     frames.ts         protobuf walk (no schema) + JSON recovery from frames and answers; IM URL detection
     mapper.ts         whatever TikTok sent → TtThread/TtMessage (tolerant, several spellings per field)
     watcher.ts        CDP capture: IM WebSocket frames and IM API answers (passive, nothing is replayed)
     ingest.ts         encrypted writes, merging (content key), album parts, reactions, "missing" detection
     media.ts          encrypted media store + download queue through the browser
-    sender.ts         sending by driving the page; confirmation by re-reading the conversation
-    sync.ts           initial import and re-checks (walks conversations, pauses between them)
+    sender.ts         page-driven sending (media uploads, fallback); confirmation by re-reading the conversation
+    sync.ts           initial import and re-checks on the page path (walks conversations, pauses between them)
     cookies.ts        "log in with your own browser": cURL/Cookie-header/JSON paste, TikTok cookie allowlist
     loginwatch.ts     tab list + cookie jar without attaching to the page (login detection)
     chromium.ts       client for this tenant's browser through the manager
     browser.ts        one TikTok tab: picking it, classifying its URL, closing the others
-    download.ts       media downloads through the browser (Network.loadNetworkResource)
-    feed.ts           the For You feed: its own tab, current/next/previous, like, comments, video streaming
-    feedAgent.ts      the in-page agent for the feed (item, controls, comments panel) + feed selector candidates
+    download.ts       media downloads inside the page (cookies included) for the CDN hosts
+    feed.ts           page-driving feed fallback: own tab/window, current/next/previous, like, comments
+    feedAgent.ts      the in-page agent for that fallback (item, controls, comments panel) + selector candidates
 ```
+
+Routes for all of this live in `server/src/api/` (`feed.ts`, `stories.ts`, `chats.ts`, `media.ts`, `send.ts`, `state.ts`).
 
 ### State machine (`service.ts`)
 
 `idle → starting → login/challenge → starting → syncing → ready`, with `error` for a lost browser (retry with backoff).
 
-* `starting`: `chromium.ensure()`, `puppeteer.connect()` to this tenant's browser, one tab (`pickTikTokTab`), navigate
-  to `/messages`.
+### Two paths: the IM protocol (normal) and the page (fallback)
+
+Once the tab is attached, `startEngine()` probes TikTok's IM protocol (`tt/im/`, protobuf on `im-api-sg.tiktok.com`,
+called with `credentials:'include'` from the tab). When it answers, everything is protocol-driven:
+
+* **catch-up** every 5 s from the stored cursor (`get_by_user_combo`, 50 rows/page, two lanes) — the cursor is rewound
+  90 s and ingest is idempotent, so nothing is lost or doubled;
+* **unsends are read** (`s:is_recalled` placeholders in `get_by_conversation`), not inferred from what vanished;
+* **the socket** (`im-ws-sg…/ws/v2`) is LZ4 + protobuf and yields typed events (chat, recall, reaction, receipt, typing);
+* **sending** is `/v1/message/send` with a per-send DPoP proof; media uploads still go through the page;
+* **profiles** (`/tiktok/v1/im/user/profile/`) name chats and group senders and fill the avatars.
+
+When the probe fails (or the origin is the test double) the v1.0–v1.5 page path runs unchanged: poll the open
+conversation every 2.5 s, import by opening conversations, infer unsends with the "missing" rule (which needs the
+read-completeness guards described below and in `tt/ingest.ts`). The web API (`tt/web/api.ts`) is bound on the protocol path; stories and
+the API feed need it.
+
+### Story logging (`tt/stories.ts`)
+
+Off by default (`settings.storyLogging`). Own timer: the first pass three minutes after a worker becomes ready, then
+`storyIntervalMinutes` (15–240, default 45) ± a quarter of it at random. One pass:
+
+1. the stories bar — `GET /api/story/user_list/?count=10&cursor=…` (the `cursor` parameter is **required even on the
+   first page**; without it TikTok answers `400 missing required fields…`), page by page, authors upserted with their
+   username/nickname encrypted and their avatar link stored for a later fetch;
+2. items — `GET /api/story/batch/item_list/?authorIds=a,b,c` for up to twenty authors per call (1.2 s apart), each item
+   inserted once by its id (pending) with `taken_at`, `expires_at`, likes and plays;
+3. media — for each pending row the pass re-asks the author's batch for the signed link and downloads it through the
+   page into the ordinary encrypted media file (`kind = 'story'`), up to `mediaMaxMb`; three attempts, then `failed`;
+4. avatars — a few per pass, refreshed daily;
+5. retention — stories older than `storyRetentionDays` (1–365) are deleted with their files.
+
+A manual check (`POST /api/stories/check`, the Stories page's "Check now") runs even while the schedule is off. Nothing
+is ever marked as seen: the tray read does not open a story in TikTok's sense.
 * While logged out: **nothing is attached to the tab.** `lookAtTab()` reads the tab list and the cookie jar over a
   browser-level CDP connection; a session cookie (`sessionid`/`sessionid_ss`/`sid_tt`) plus the tab not being on a
   login/check page is what flips the state to attaching. The tab is pointed at `/login` (TikTok's own pages redirect
@@ -290,7 +330,8 @@ React 19 + Vite + TypeScript SPA, built into the server's static assets. No CDN,
 (strict CSP). `@novnc/novnc` for the TikTok screen, `qrcode` for TOTP enrollment.
 
 Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (chats), `/chat/:chatId`, `/feed`
-(For You), `/deleted` ("Unsent"), `/search`, `/tiktok`, `/settings`, `/admin`. A route guard uses `GET /api/state`.
+(For You), `/stories` (logged stories), `/deleted` ("Unsent"), `/search`, `/tiktok`, `/settings`, `/admin`. A route guard
+uses `GET /api/state`.
 
 Chat view: date separators; sender names in groups; text rendered as text (links and @mentions only, never HTML);
 quoted replies; media grid with lightbox, video player, audio player; shared-post cards with a link out; select
@@ -300,6 +341,10 @@ audio and voice recording (MP4 or Ogg/Opus). Light and dark themes, single pane 
 Feed (`pages/Feed.tsx`): a full-height stage with the video (muted by default, click to unmute), author/caption/music and
 stats, a rail with like / comments / send / mute / open-on-TikTok, up/down arrows and `↑`/`↓` or `J`/`K`, a comments
 panel with replies and a composer, and a chat picker for "send this video".
+
+Stories (`pages/Stories.tsx`): a row of authors in gradient rings with their story counts, a tile grid (a video frame or
+the photo, a badge while it downloads), a full-screen viewer that plays videos, holds photos five seconds and steps with
+← / →, and "Check now". Settings → Logging also holds the story toggle, interval, retention and the per-account picker.
 
 Settings → Logging holds the media/history limits, session refresh and the re-check interval; Settings → TikTok holds
 the connection, the session paste panel and **Diagnostics** ("Check what is being read" / "Show the page's structure"),
@@ -415,10 +460,16 @@ reactions(message_id, sender_id, emoji_enc, ts, removed_at, PRIMARY KEY(message_
 -- migration 2 (multi-user): an admin-issued temporary password (mode 'new': no owner row yet; mode 'reset': the
 -- owner row is kept and the data stays)
 pending_claim(id CHECK (id = 1), username, mode, salt, auth_hash, failed_logins, locked_until, created_at)
+-- migration 3 (stories): story logging
+story_users(id TEXT PRIMARY KEY /* TikTok uid */, username_enc, name_enc, avatar_url, avatar_media_id,
+            avatar_checked_at, last_story_at, created_at, updated_at)
+stories(id TEXT PRIMARY KEY /* story item id */, user_id, type /* image|video */, taken_at, expires_at, media_id,
+        mime_enc, likes, plays, status /* pending|downloaded|failed|too_large */, attempts, captured_at)
+  INDEX (taken_at), (user_id, taken_at), (status)
 ```
 
 Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`, `onboarding_complete`,
-`initial_sync_done`. Media `kind`: `message`, `avatar`.
+`initial_sync_done`, `im_state` (IM cursors and conversation ids). Media `kind`: `message`, `avatar`, `story`.
 
 ## 8. HTTP API (JSON; DTOs in `shared/api.d.ts`)
 
@@ -435,10 +486,14 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | POST | /api/onboarding/complete | ✓ | requires state ready/syncing |
 | GET / WS | /api/vnc/credentials · /api/vnc | ✓ | noVNC password · bridge to the browser's screen |
 | GET | /api/feed | ✓ | `{item}`: the video in view (`FeedItem`, media as app URLs) |
+| GET | /api/feed/window?limit=3 | ✓ | `{items,current}`: the video in view plus the next few (the clients swipe these) |
+| POST | /api/feed/goto | ✓ | `{id}` → `{items,current}`: move the remote page to a swiped-to video |
 | POST | /api/feed/step | ✓ | `{dir: next\|prev}` → `{item}` |
 | POST | /api/feed/:id/like | ✓ | `{like}` → `{liked}` (TikTok's own control) |
 | GET · POST | /api/feed/:id/comments · /api/feed/:id/comment | ✓ | `{comments}` · posts `{text}` (≤150) |
-| GET | /api/feed/media/:ref | ✓ | the video/poster/avatar, streamed through the browser (no Range) |
+| GET | /api/feed/media/:ref | ✓ | the video/poster/avatar from the server's cache, with `Content-Length`, Range (206) and an ETag |
+| GET | /api/stories/status · /api/stories/authors · /api/stories/accounts · /api/stories?user=&before=&limit= | ✓ | story logging status, authors with items, every account seen in the bar, `StoryPage` |
+| POST | /api/stories/check | ✓ | runs a pass now (also while the schedule is off) |
 | GET | /api/chats | ✓ | `ChatSummary[]` |
 | GET | /api/chats/:chatId/messages?before= · /messages/around/:messageId · /messages/after?after= | ✓ | `MessagePage` |
 | GET | /api/messages/:messageId · /edits | ✓ | one message · edit history |
@@ -454,7 +509,7 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | POST | /api/auth/claim · /api/auth/verify · /api/auth/ping · GET /api/auth/whoami | | claim a temporary password · re-check the password |
 | GET/POST | /internal/* (provision, info, signup, reset, revoke-sessions, unlink) | gateway only | token + scope header |
 | GET | /api/events | ✓ | SSE: `tt_state`, `message`, `message_update`, `chat_update`, `sync_progress`, `session_revoked` |
-| GET/PUT | /api/settings | ✓ | `{downloadHistoryMedia, mediaMaxMb, historyPerChat, readReceipts, sessionRefresh, sessionRefreshHours, reconcileMinutes}` |
+| GET/PUT | /api/settings | ✓ | `{downloadHistoryMedia, mediaMaxMb, historyPerChat, readReceipts, sessionRefresh, sessionRefreshHours, reconcileMinutes, storyLogging, storyIntervalMinutes, storyRetentionDays, storySelected}` |
 | GET | /api/audit · POST /api/data/wipe | ✓ (+ password) | audit log · delete all logged data |
 
 ## 9. Configuration (`.env`, generated by `scripts/setup.sh`)
@@ -470,11 +525,14 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
 
 ## 10. Testing
 
-* `server` (vitest, 124 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
+* `server` (vitest, 205 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
   hardening; `tt/frames.test.ts` (protobuf walk, JSON recovery, bounds, IM URL/socket detection);
   `tt/mapper.test.ts` (TikTok answer shapes, content JSON, stickers/media, junk rejection, DOM rows, stable ids);
   `tt/ingest.test.ts` (encrypted storage with no plaintext in the file, DOM/network merge, album parts, idempotency,
-  anti-delete with its 60 s rule, reactions, own messages).
+  anti-delete with its 60 s rule, reactions, own messages); `tt/im/` (wire codec, message shapes, engine import and
+  catch-up); `tt/feedApi.test.ts` (the API feed and its comments); `tt/stories.test.ts` (tray/batch parsers over the
+  live shapes, a photo story, an item without media, the delay bounds, stored-once, the retention sweep deleting story
+  and file, the encrypted identity, a manual check while the schedule is off).
 * `web`: vitest for the text renderer and the Opus/OGG recorder, typecheck, production build.
 * `chromium/manager`: `CGO_ENABLED=0 go test ./...` (tokens shared with `supervisor/tokens.ts`, route allowlist, VNC
   tunnel), also run in the image build.
@@ -489,9 +547,12 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
 * `scripts/smoke.sh`: the containers — TLS (and no SNI), headers, cookies, CSRF/Origin, signup, the real tiktok.com
   login page in the locked-down Chromium (state `login`), VNC handshake, no app egress, the Chromium sandbox, the admin
   API, a created user, `/internal` unreachable from outside, one unix user per process.
-* **Not tested against a real TikTok account yet** (needs the owner's login): today's IM answer shapes, the stream
-  frame format and the messages page's DOM. `docs/tiktok-notes.md` has the procedure for the first live check and the
-  facts the implementation is based on.
+* **Live checks are done against the owner's own account** (CT 124) by running the deployed code inside the app
+  container against the real tab: the IM protocol, the web API (feed, comments, stories), the page selectors and the
+  media path. `docs/tiktok-notes.md` has the endpoint shapes and the probe procedure.
+* Known failing harness check: `service-check.mts` "media rows are queued for download" reports `media_status` `none`
+  after the IM rewrite (media is fetched by the engine for private photos and by the queue for the rest); re-check it
+  when the media path is next touched.
 
 ## 11. Deployment & operations
 
