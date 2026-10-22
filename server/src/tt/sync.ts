@@ -33,8 +33,23 @@ export class Sync {
   }
 
   /** First import: the newest conversations, each read down to `historyPerChat` messages (a few scroll-ups). */
+  /**
+   * The conversation list renders late and in pieces: reading it the moment the page opens returns one or two rows.
+   * Wait until the count stops growing (two equal reads, 12 s at most) before importing, or conversations are missed.
+   */
+  private async settledThreads(): Promise<TtThread[]> {
+    let last: TtThread[] = [];
+    for (let i = 0; i < 8; i++) {
+      const now = await this.deps.threads();
+      if (now.length && now.length === last.length) return now;
+      if (now.length > last.length) last = now;
+      if (i > 0 || now.length) await sleep(1200);
+    }
+    return last;
+  }
+
   async initial(): Promise<void> {
-    const threads = await this.deps.threads();
+    const threads = await this.settledThreads();
     const perChat = this.ctx.settings.get().historyPerChat;
     const chats = threads.slice(0, INITIAL_CHATS);
     this.deps.progress('history', 0, chats.length);
@@ -50,7 +65,7 @@ export class Sync {
 
   /** Re-read the newest conversations (and the ones with unread messages) to notice unsent messages. */
   async reconcile(): Promise<void> {
-    const threads = await this.deps.threads();
+    const threads = await this.settledThreads();
     const chosen = new Map<string, TtThread>();
     for (const t of threads.slice(0, 10)) chosen.set(t.id, t);
     for (const t of threads) if ((t.unread ?? 0) > 0 && chosen.size < RECONCILE_CHATS) chosen.set(t.id, t);
