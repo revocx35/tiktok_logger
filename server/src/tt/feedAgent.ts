@@ -276,11 +276,40 @@ const AGENT = String.raw`
     return false;
   };
 
+  /** Items in feed order, as TikTok numbers them. */
+  const orderedItems = () => all('[data-scroll-index]')
+    .map((el) => ({ el, i: Number(el.getAttribute('data-scroll-index')) }))
+    .filter((x) => Number.isFinite(x.i))
+    .sort((a, b) => a.i - b.i);
+
+  /**
+   * Moves one video up/down.
+   *
+   * The feed is a snapping scroll container: its arrows are not always rendered, and a synthetic ArrowDown does not
+   * move it (the handler wants a trusted key). Scrolling the neighbouring item into view is what a swipe does, and it
+   * works in a background tab as well.
+   */
   const step = (dir) => {
+    const items = orderedItems();
     const el = currentEl();
+    const curIdx = el && el.getAttribute ? Number(el.getAttribute('data-scroll-index')) : NaN;
+    if (Number.isFinite(curIdx)) {
+      const target = items.find((x) => x.i === curIdx + (dir === 'next' ? 1 : -1));
+      if (target) {
+        target.el.scrollIntoView({ block: 'start', behavior: 'instant' });
+        return { ok: true, via: 'scrollIntoView' };
+      }
+      // At the edge of what is rendered: move the container a viewport and let TikTok append the next items.
+      const scroller = all('div')
+        .filter((d) => d.scrollHeight > d.clientHeight + 200 && d.clientHeight > window.innerHeight * 0.5)
+        .sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
+      if (scroller) {
+        scroller.scrollTop += dir === 'next' ? scroller.clientHeight : -scroller.clientHeight;
+        return { ok: true, via: 'container' };
+      }
+    }
     const clicked = clickIn(dir === 'next' ? S.nextButton : S.prevButton, el || document) || clickIn(dir === 'next' ? S.nextButton : S.prevButton, document);
     if (clicked) return { ok: true, via: 'button' };
-    // Keyboard is the fallback; TikTok's feed listens for the arrow keys on the document.
     const ev = (type) => new KeyboardEvent(type, { key: dir === 'next' ? 'ArrowDown' : 'ArrowUp', code: dir === 'next' ? 'ArrowDown' : 'ArrowUp', keyCode: dir === 'next' ? 40 : 38, bubbles: true, cancelable: true });
     for (const t of ['keydown', 'keyup']) document.dispatchEvent(ev(t));
     return { ok: true, via: 'keyboard' };
