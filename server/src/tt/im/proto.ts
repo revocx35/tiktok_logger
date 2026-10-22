@@ -257,7 +257,7 @@ export function buildReactionRequest(env: ImEnv, a: ReactionArgs): Buffer {
   const mutation = new PbWriter().u64(1, 0).string(2, `e:${a.emoji}`).string(4, a.selfUserId);
   const body = new PbWriter()
     .string(1, a.convId)
-    .u64(2, 1)
+    .u64(2, a.isGroup ? 2 : 1)
     .u64(3, BigInt(a.sourceId || '0'))
     .u64(4, BigInt(a.messageId))
     .string(5, a.clientMessageId)
@@ -278,7 +278,7 @@ export function buildUnreactionRequest(env: ImEnv, a: ReactionArgs): Buffer {
   const mutation = new PbWriter().u64(1, 1).string(2, `e:${a.emoji}`).string(4, a.selfUserId);
   const body = new PbWriter()
     .string(1, a.convId)
-    .u64(2, 1)
+    .u64(2, a.isGroup ? 2 : 1)
     .u64(3, BigInt(a.sourceId || '0'))
     .u64(4, BigInt(a.messageId))
     .string(5, a.clientMessageId)

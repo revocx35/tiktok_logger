@@ -349,6 +349,13 @@ describe('reactions (set_property, 705/10008)', () => {
     expect(meta).toContain('tt-ticket-guard-public-key');
   });
 
+  it('uses action_flag 2 in a group (1 in a direct chat), as TikTok\'s own client does', () => {
+    const group = sub(sub(sub(readFields(buildReactionRequest(env, { ...args, isGroup: true })), 8)!, 705)!, 1)!;
+    expect(num(group, 2)).toBe('2');
+    const dm = sub(sub(sub(readFields(buildReactionRequest(env, args)), 8)!, 705)!, 1)!;
+    expect(num(dm, 2)).toBe('1');
+  });
+
   it('builds a remove-reaction envelope with action 1', () => {
     const body = sub(sub(sub(readFields(buildUnreactionRequest(env, args)), 8)!, 705)!, 1)!;
     expect(num(sub(body, 6)!, 1)).toBe('1'); // 1 = remove
