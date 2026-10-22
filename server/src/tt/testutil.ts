@@ -8,9 +8,17 @@ import { EventBus } from '../events.js';
 import { createLogger } from '../log.js';
 import { loadConfig } from '../config.js';
 import { SettingsStore } from '../settings.js';
+import { DataReader } from '../crypto/keyring.js';
 
 /** A real encrypted database in a temp dir, as the worker uses — for tests only. */
-export async function makeCtx(): Promise<{ ctx: AppContext; dir: string; events: EventBus; cleanup: () => Promise<void> }> {
+export async function makeCtx(): Promise<{
+  ctx: AppContext;
+  dir: string;
+  events: EventBus;
+  /** Reads what the tests wrote (the owner's key is generated here, so it can decrypt). */
+  reader: DataReader;
+  cleanup: () => Promise<void>;
+}> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ttl-test-'));
   const config = loadConfig({ NODE_ENV: 'test', DATA_DIR: dir, SCRYPT_LOG_N: '10', TT_ENABLED: 'false', LOG_LEVEL: 'silent' } as NodeJS.ProcessEnv);
   const repo = new Repo(openDb(config.dbPath));
@@ -37,5 +45,23 @@ export async function makeCtx(): Promise<{ ctx: AppContext; dir: string; events:
     created_at: now,
     password_changed_at: now,
   });
-  return { ctx, dir, events, cleanup: () => fs.rm(dir, { recursive: true, force: true }) };
+  const reader = DataReader.fromPkcs8(repo, kp.privatePkcs8);
+  // A background download can still be writing into the directory when a test ends (the engine's avatar fetch), and a
+  // plain rm then fails with ENOTEMPTY; retrying is enough.
+  return {
+    ctx,
+    dir,
+    events,
+    reader,
+    cleanup: async () => {
+      for (let i = 0; i < 5; i++) {
+        try {
+          await fs.rm(dir, { recursive: true, force: true });
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, 60));
+        }
+      }
+    },
+  };
 }

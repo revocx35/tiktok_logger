@@ -7,6 +7,7 @@ import { Spinner } from './components/ui';
 import { AdminPage } from './pages/Admin';
 import { LoginPage, RecoverPage, SetupRecoveryPage, SignupPage } from './pages/Auth';
 import { FeedPage } from './pages/Feed';
+import { StoriesPage } from './pages/Stories';
 import { MainLayout } from './pages/MainLayout';
 import { ChatsPage, DeletedPage, TikTokPage, NotFoundPage, SearchPage } from './pages/Pages';
 import { SettingsPage } from './pages/Settings';
@@ -67,6 +68,7 @@ const router = createBrowserRouter([
         children: [
           { path: '/', element: <ChatsPage /> },
           { path: '/feed', element: <FeedPage /> },
+          { path: '/stories', element: <StoriesPage /> },
           { path: '/chat/:chatId', element: <ChatsPage /> },
           { path: '/deleted', element: <DeletedPage /> },
           { path: '/search', element: <SearchPage /> },

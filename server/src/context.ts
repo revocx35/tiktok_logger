@@ -1,4 +1,4 @@
-import type { FeedComment, FeedItem, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
+import type { FeedComment, FeedItem, StoryStatus, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
 import type { Config } from './config.js';
 import type { SessionCookie } from './tt/cookies.js';
 import { Errors } from './errors.js';
@@ -39,6 +39,17 @@ export interface TtFeed {
   mediaStats(): { refs: number; cached: number; bytes: number; inflight: number };
 }
 
+/** Story logging (see tt/stories.ts), used by the HTTP layer. */
+export interface TtStories {
+  status(): StoryStatus;
+  /** Runs one pass now (the Stories page's "check now" button runs it even while the schedule is off). */
+  checkNow(opts?: { manual?: boolean }): Promise<StoryStatus>;
+  /** Follows the story settings (toggle, interval). */
+  reconfigure(): void;
+  /** Deletes stories past the retention setting, with their files. */
+  sweep(): Promise<number>;
+}
+
 /** Control surface of the TikTok integration, used by the HTTP layer. */
 export interface TtController {
   status(): TtStatus;
@@ -61,6 +72,7 @@ export interface TtController {
   stop(): Promise<void>;
   readonly sender: TtSender;
   readonly feed: TtFeed;
+  readonly stories: TtStories;
 }
 
 export interface TtDiagnostics {
@@ -135,6 +147,12 @@ export class NullTt implements TtController {
     mediaOf: async () => null,
     mediaCached: () => false,
     mediaStats: () => ({ refs: 0, cached: 0, bytes: 0, inflight: 0 }),
+  };
+  readonly stories: TtStories = {
+    status: () => ({ logging: false, lastCheckAt: null, nextCheckAt: null, lastResult: 'TikTok is not connected.', authors: 0, items: 0, pending: 0, downloaded: 0 }),
+    checkNow: notConnected,
+    reconfigure: () => undefined,
+    sweep: async () => 0,
   };
   readonly sender: TtSender = {
     sendText: notConnected,

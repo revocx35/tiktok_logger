@@ -10,6 +10,10 @@ export const SettingsSchema = z.object({
   sessionRefresh: z.boolean(),
   sessionRefreshHours: z.number().int().min(1).max(24),
   reconcileMinutes: z.number().int().min(5).max(240),
+  storyLogging: z.boolean(),
+  storyIntervalMinutes: z.number().int().min(15).max(240),
+  storyRetentionDays: z.number().int().min(1).max(365),
+  storySelected: z.array(z.string().regex(/^\d{1,30}$/)).max(500),
 });
 
 const KEY = 'settings';
@@ -33,6 +37,10 @@ export class SettingsStore {
       sessionRefresh: true,
       sessionRefreshHours: 2,
       reconcileMinutes: 10,
+      storyLogging: false,
+      storyIntervalMinutes: 45,
+      storyRetentionDays: 7,
+      storySelected: [],
     };
     const raw = this.repo.getState(KEY);
     let stored: Partial<Settings> = {};

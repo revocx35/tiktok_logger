@@ -64,7 +64,7 @@ export interface MediaRow {
   mime_enc: Buffer | null;
   filename_enc: Buffer | null;
   size: number;
-  kind: 'message' | 'avatar';
+  kind: 'message' | 'avatar' | 'story';
   created_at: number;
 }
 
@@ -187,7 +187,42 @@ export const F = {
   reaction: (messageId: string, senderId: string) => ['reactions', 'emoji', `${messageId}|${senderId}`] as const,
   mediaMime: (path: string) => ['media', 'mime', path] as const,
   mediaFilename: (path: string) => ['media', 'filename', path] as const,
+  storyUsername: (id: string) => ['story_users', 'username', id] as const,
+  storyName: (id: string) => ['story_users', 'name', id] as const,
+  storyMime: (id: string) => ['stories', 'mime', id] as const,
 };
+
+export interface StoryUserRow {
+  id: string;
+  username_enc: Buffer | null;
+  name_enc: Buffer | null;
+  avatar_url: string | null;
+  avatar_media_id: number | null;
+  avatar_checked_at: number | null;
+  last_story_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface StoryUserListRow extends StoryUserRow {
+  count: number;
+  latest: number | null;
+}
+
+export interface StoryRow {
+  id: string;
+  user_id: string;
+  type: 'image' | 'video';
+  taken_at: number;
+  expires_at: number | null;
+  media_id: number | null;
+  mime_enc: Buffer | null;
+  likes: number | null;
+  plays: number | null;
+  status: 'pending' | 'downloaded' | 'failed' | 'too_large';
+  attempts: number;
+  captured_at: number;
+}
 
 /* ---------------------------------------------------------------- repo */
 
@@ -399,6 +434,132 @@ export class Repo implements DataKeyStore {
   }
 
   /* ------------------------------------------------------------ audit */
+
+  /* ---------------------------------------------------------------- stories */
+
+  getStoryUser(id: string): StoryUserRow | undefined {
+    return this.db.prepare('SELECT * FROM story_users WHERE id = ?').get(id) as StoryUserRow | undefined;
+  }
+
+  /** Inserts an author seen in the stories bar, or refreshes the identity fields of a known one. */
+  upsertStoryUser(u: { id: string; usernameEnc: Buffer | null; nameEnc: Buffer | null; avatarUrl: string | null; now: number }): void {
+    this.db
+      .prepare(
+        `INSERT INTO story_users (id, username_enc, name_enc, avatar_url, last_story_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           username_enc = COALESCE(excluded.username_enc, story_users.username_enc),
+           name_enc = COALESCE(excluded.name_enc, story_users.name_enc),
+           avatar_url = COALESCE(excluded.avatar_url, story_users.avatar_url),
+           updated_at = excluded.updated_at`,
+      )
+      .run(u.id, u.usernameEnc, u.nameEnc, u.avatarUrl, u.now, u.now);
+  }
+
+  markStoryUserCaptured(id: string, latest: number, now: number): void {
+    this.db
+      .prepare('UPDATE story_users SET last_story_at = MAX(COALESCE(last_story_at, 0), ?), updated_at = ? WHERE id = ?')
+      .run(latest, now, id);
+  }
+
+  setStoryUserAvatar(id: string, mediaId: number | null, checkedAt: number): void {
+    this.db.prepare('UPDATE story_users SET avatar_media_id = ?, avatar_checked_at = ? WHERE id = ?').run(mediaId, checkedAt, id);
+  }
+
+  /** Authors with logged stories (what the Stories page lists first), newest activity first. */
+  listStoryUsers(): StoryUserListRow[] {
+    return this.db
+      .prepare(
+        `SELECT u.*,
+           (SELECT COUNT(*) FROM stories s WHERE s.user_id = u.id) AS count,
+           (SELECT MAX(s.taken_at) FROM stories s WHERE s.user_id = u.id) AS latest
+         FROM story_users u
+         WHERE EXISTS (SELECT 1 FROM stories s WHERE s.user_id = u.id)
+         ORDER BY latest DESC`,
+      )
+      .all() as StoryUserListRow[];
+  }
+
+  /** Every author known from the stories bar, for choosing whose stories are logged. */
+  listKnownStoryUsers(): StoryUserListRow[] {
+    return this.db
+      .prepare(
+        `SELECT u.*,
+           (SELECT COUNT(*) FROM stories s WHERE s.user_id = u.id) AS count,
+           (SELECT MAX(s.taken_at) FROM stories s WHERE s.user_id = u.id) AS latest
+         FROM story_users u
+         ORDER BY u.last_story_at DESC, u.updated_at DESC`,
+      )
+      .all() as StoryUserListRow[];
+  }
+
+  /** Authors whose avatar still has to be fetched (or refreshed after a day). */
+  storyUsersNeedingAvatar(olderThan: number, limit: number): StoryUserRow[] {
+    return this.db
+      .prepare(
+        'SELECT * FROM story_users WHERE avatar_url IS NOT NULL AND (avatar_checked_at IS NULL OR avatar_checked_at < ?) ORDER BY updated_at DESC LIMIT ?',
+      )
+      .all(olderThan, limit) as StoryUserRow[];
+  }
+
+  getStory(id: string): StoryRow | undefined {
+    return this.db.prepare('SELECT * FROM stories WHERE id = ?').get(id) as StoryRow | undefined;
+  }
+
+  /** Stores a story unless it is already known (the same item comes back on every pass until it expires). */
+  insertStory(row: Omit<StoryRow, 'attempts' | 'captured_at'> & { capturedAt?: number }): boolean {
+    const now = row.capturedAt ?? Date.now();
+    const r = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO stories (id, user_id, type, taken_at, expires_at, media_id, mime_enc, likes, plays, status, attempts, captured_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      )
+      .run(row.id, row.user_id, row.type, row.taken_at, row.expires_at, row.media_id, row.mime_enc, row.likes, row.plays, row.status, now);
+    return r.changes > 0;
+  }
+
+  setStoryMedia(id: string, mediaId: number | null, mimeEnc: Buffer | null, status: StoryRow['status']): void {
+    this.db
+      .prepare('UPDATE stories SET media_id = ?, mime_enc = ?, status = ?, attempts = attempts + 1 WHERE id = ?')
+      .run(mediaId, mimeEnc, status, id);
+  }
+
+  pendingStories(limit: number): StoryRow[] {
+    return this.db
+      .prepare("SELECT * FROM stories WHERE status = 'pending' AND attempts < 3 ORDER BY taken_at DESC LIMIT ?")
+      .all(limit) as StoryRow[];
+  }
+
+  /** Stories by status, for the status line. */
+  countStoriesByStatus(): { total: number; pending: number; downloaded: number } {
+    const rows = this.db.prepare('SELECT status, COUNT(*) AS n FROM stories GROUP BY status').all() as { status: string; n: number }[];
+    const at = (s: string) => rows.find((r) => r.status === s)?.n ?? 0;
+    return { total: rows.reduce((a, r) => a + r.n, 0), pending: at('pending'), downloaded: at('downloaded') };
+  }
+
+  listStories(q: { userId?: string | null; before?: number | null; limit: number }): StoryRow[] {
+    const args: unknown[] = [];
+    let where = '1 = 1';
+    if (q.userId) {
+      where += ' AND user_id = ?';
+      args.push(q.userId);
+    }
+    if (q.before) {
+      where += ' AND taken_at < ?';
+      args.push(q.before);
+    }
+    args.push(q.limit);
+    return this.db.prepare(`SELECT * FROM stories WHERE ${where} ORDER BY taken_at DESC, id DESC LIMIT ?`).all(...args) as StoryRow[];
+  }
+
+  /** Ids and media of the stories older than [before] (the retention sweep deletes the files as well). */
+  storiesOlderThan(before: number): { id: string; media_id: number | null }[] {
+    return this.db.prepare('SELECT id, media_id FROM stories WHERE taken_at < ?').all(before) as { id: string; media_id: number | null }[];
+  }
+
+  deleteStory(id: string): void {
+    this.db.prepare('DELETE FROM stories WHERE id = ?').run(id);
+  }
 
   audit(event: string, ip: string | null, detail?: string | null, ts = Date.now()): void {
     this.db.prepare('INSERT INTO audit_log (ts, event, ip, detail) VALUES (?, ?, ?, ?)').run(ts, event, ip, detail ?? null);

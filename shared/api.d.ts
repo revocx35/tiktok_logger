@@ -319,7 +319,15 @@ export interface Settings {
    * After the initial import, re-read the newest conversations this often (minutes) to notice unsent messages.
    * Opening a conversation in the browser marks it seen on TikTok; that is what the import has to do (see README).
    */
-  reconcileMinutes: number; // 5..240
+  reconcileMinutes: number;
+  /** Log the stories of the accounts the owner follows (off by default), like insta_logger. */
+  storyLogging: boolean;
+  /** How often the stories bar is read, in minutes (± up to a quarter of it, random). */
+  storyIntervalMinutes: number; // 15..240
+  /** Stories older than this are deleted with their media. */
+  storyRetentionDays: number; // 1..365
+  /** TikTok user ids whose stories are logged; empty = every author seen in the stories bar. */
+  storySelected: string[]; // 5..240
 }
 
 export interface AuditEntry { id: number; ts: number; event: string; ip: string | null; detail: string | null }
@@ -459,4 +467,64 @@ export interface AdminAuditEntry {
   target: string | null;
   ip: string | null;
   detail: string | null;
+}
+
+/* ------------------------------------------------------------------ stories */
+
+export interface StoryStatus {
+  logging: boolean;
+  lastCheckAt: number | null;
+  nextCheckAt: number | null;
+  lastResult: string | null;
+  /** Authors known from the stories bar, and stories stored (with how many still need their media). */
+  authors: number;
+  items: number;
+  pending: number;
+  downloaded: number;
+}
+
+export type StoryType = 'image' | 'video';
+export type StoryMediaStatus = 'pending' | 'downloaded' | 'failed' | 'too_large';
+
+/** One author with logged stories. */
+export interface StoryAuthor {
+  id: string;
+  username: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  count: number;
+  latest: number | null;
+}
+
+/** Every account seen in the stories bar, for choosing whose stories are logged. */
+export interface StoryAccount {
+  id: string;
+  username: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  count: number;
+  selected: boolean;
+}
+
+/** A single logged story. [url] is the app's own media route once its media was downloaded. */
+export interface StoryItem {
+  id: string;
+  userId: string;
+  username: string | null;
+  name: string | null;
+  type: StoryType;
+  takenAt: number;
+  expiresAt: number | null;
+  status: StoryMediaStatus;
+  url: string | null;
+  mime: string | null;
+  /** The item's own numbers, when TikTok reported them. */
+  likes: number | null;
+  plays: number | null;
+}
+
+export interface StoryPage {
+  items: StoryItem[];
+  /** Cursor for the next page (a story time in ms), or null at the end. */
+  nextBefore: number | null;
 }

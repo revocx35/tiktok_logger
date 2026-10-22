@@ -12,6 +12,7 @@ import type { ChatDriver } from './driver.js';
 import { BrowserDownloader } from './download.js';
 import { FeedCatalog, FeedService } from './feed.js';
 import { ApiFeed } from './feedApi.js';
+import { StoryLogger } from './stories.js';
 import { WebApi } from './web/api.js';
 import { Ingest, MediaSources } from './ingest.js';
 import { lookAtTab, nextLoginStep, setSessionCookies, steerTab } from './loginwatch.js';
@@ -77,6 +78,8 @@ export class TtService implements TtController, ChatDriver {
   private readonly pageFeed: FeedService;
   private readonly apiFeed: ApiFeed;
   private webApiRef: WebApi | null = null;
+  /** Story logging (off by default); it reads the stories bar through the web API. */
+  readonly stories: StoryLogger;
   /** Item ids and signed video URLs captured from the For You page's own JSON. */
   private readonly feedCatalog = new FeedCatalog();
   /** The For You tab (created on demand, kept for the session; never the messages tab). */
@@ -104,6 +107,7 @@ export class TtService implements TtController, ChatDriver {
     this.sender = new Sender(ctx, this.ingest, this);
     this.pageFeed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
     this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef);
+    this.stories = new StoryLogger(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
     this.feed = routedFeed(() => (this.webApiRef ? this.apiFeed : null), this.pageFeed);
     this.sync = new Sync(ctx, {
       threads: () => this.readThreads(),
@@ -490,6 +494,8 @@ export class TtService implements TtController, ChatDriver {
 
   private startLoops(gen: number): void {
     this.stopLoops();
+    // Story logging keeps its own timer: it only needs the web API, and the settings decide whether it runs at all.
+    this.stories.reconfigure();
     const poll = async () => {
       if (gen !== this.gen || this.stopped) return;
       try {
@@ -557,6 +563,7 @@ export class TtService implements TtController, ChatDriver {
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
     this.media.pause();
+    this.stories.stop();
     await this.pageFeed.reset().catch(() => undefined);
     const feedPage = this.feedPageRef;
     this.feedPageRef = null;

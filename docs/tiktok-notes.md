@@ -99,3 +99,14 @@ Never paste real message content, session cookies or `msToken` values into an is
   put an app-shaped fingerprint on the account from a datacenter IP.
 * Opening a conversation marks it read on TikTok. The import and the re-check open conversations by design; do not add
   extra opening (no "read every chat every minute" features).
+
+## Stories (web API, read from the messages tab)
+
+| Call | Answer |
+|------|--------|
+| `GET /api/story/user_list/?count=10&cursor=0` | `{storyUsers:[{user:{id,uniqueId,nickname,avatarMedium}}],cursor,hasMore}` — `cursor` is required, missing it is a 400 `missing required fields` |
+| `GET /api/story/batch/item_list/?authorIds=<id>,<id>&cursor=0` | `{batchStoryItemLists:[{AuthorId,LastStoryCreatedAt,TotalCount,itemList:[…]}]}` |
+| item | `{id, createTime (seconds), desc, video:{playAddr,downloadAddr,cover}, story:{ExpiredAt (ms),Viewed}, stats, imagePost?}` |
+
+A photo story has `imagePost.images[]` (pick the widest) and no `playAddr`. Both calls are signed by the page's own
+`fetch` hook like every other `www.tiktok.com/api/…` call (see `tt/web/api.ts`).

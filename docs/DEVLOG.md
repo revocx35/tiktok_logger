@@ -1,5 +1,24 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.8.0: story logging (stories section)
+
+TikTok's stories are 24-hour posts; insta_logger logs Instagram's the same way, so this is the same shape: a periodic
+read of the stories bar (`GET /api/story/user_list/?count=10&cursor=…` — the endpoint needs `cursor` even on the first
+page, without it TikTok answers 400 `missing required fields…`), then one batch call per 20 authors
+(`GET /api/story/batch/item_list/?authorIds=a,b,c`) whose answer carries each item's `video.playAddr`, `story.ExpiredAt`
+and `createTime` (seconds). Photo stories have `imagePost.images[]` and no play address; the biggest candidate wins.
+
+* an item is stored once (its id is the primary key) and its media is downloaded through the page into the same
+  encrypted media files as a message's, served by the existing `/api/media/:id` route (range + decryption included);
+* every pass sweeps stories older than `storyRetentionDays` (and their files), so the log cannot grow without bound;
+* the interval is `storyIntervalMinutes` ± a quarter of it (random), the first pass runs three minutes after start;
+* off by default, `storySelected` limits whose stories are kept (empty = everyone in the bar), and nothing is marked as
+  seen — the tray read is all it does;
+* avatars of the authors are fetched a few per pass (they are content, so they are encrypted too).
+
+Tests: `tt/stories.test.ts` (9) — tray and batch parsers over the live shapes, a photo story, an item without media,
+the delay bounds, "stored once", the retention sweep deleting story and file, and the identity staying encrypted.
+
 ## 2026-10-22 — v1.7.1: "refused code 100", names and pictures, background share
 
 * **Send reported "TikTok refused (code 100)" although the message was sent.** The send answer's field 1 echoes the request

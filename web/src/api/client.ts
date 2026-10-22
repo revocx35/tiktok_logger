@@ -23,6 +23,10 @@ import type {
   SendResult,
   SessionInfo,
   Settings,
+  StoryAccount,
+  StoryAuthor,
+  StoryPage,
+  StoryStatus,
   SignupResponse,
   TotpSetupResponse,
   UploadResponse,
@@ -179,6 +183,17 @@ export const api = {
   editMessage: (messageId: string, text: string) => request<{ ok: true }>('POST', `/api/messages/${enc(messageId)}/edit`, { text }),
   markRead: (chatId: string) => request<{ ok: true }>('POST', `/api/chats/${enc(chatId)}/read`),
 
+  storiesStatus: () => request<StoryStatus>('GET', '/api/stories/status'),
+  storiesCheck: () => request<StoryStatus>('POST', '/api/stories/check'),
+  storiesAuthors: () => request<StoryAuthor[]>('GET', '/api/stories/authors'),
+  storiesAccounts: () => request<StoryAccount[]>('GET', '/api/stories/accounts'),
+  stories: (q: { user?: string; before?: number | null; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.user) p.set('user', q.user);
+    if (q.before) p.set('before', String(q.before));
+    p.set('limit', String(q.limit ?? 60));
+    return request<StoryPage>('GET', `/api/stories?${p.toString()}`);
+  },
   settings: () => request<Settings>('GET', '/api/settings'),
   updateSettings: (patch: Partial<Settings>) => request<Settings>('PUT', '/api/settings', patch),
   audit: (before?: number) => request<AuditEntry[]>('GET', `/api/audit?limit=100${before ? `&before=${before}` : ''}`),

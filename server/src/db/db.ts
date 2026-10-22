@@ -180,6 +180,44 @@ const MIGRATIONS: { id: number; name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    id: 3,
+    name: 'stories',
+    // Story logging (off by default, see tt/stories.ts): the authors seen in TikTok's stories bar and every story
+    // item captured for them. Media is an ordinary encrypted media file; deleting a story keeps its file reference
+    // only until the retention sweep removes both.
+    sql: `
+      CREATE TABLE story_users (
+        id TEXT PRIMARY KEY,                 -- TikTok user id
+        username_enc BLOB,
+        name_enc BLOB,
+        avatar_url TEXT,                     -- signed CDN link (refreshed on every pass)
+        avatar_media_id INTEGER REFERENCES media (id) ON DELETE SET NULL,
+        avatar_checked_at INTEGER,
+        last_story_at INTEGER,               -- newest story time (ms) captured for this author
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE stories (
+        id TEXT PRIMARY KEY,                 -- TikTok story item id
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,                  -- image | video
+        taken_at INTEGER NOT NULL,
+        expires_at INTEGER,
+        media_id INTEGER REFERENCES media (id) ON DELETE SET NULL,
+        mime_enc BLOB,
+        likes INTEGER,
+        plays INTEGER,
+        status TEXT NOT NULL,                -- pending | downloaded | failed | too_large
+        attempts INTEGER NOT NULL DEFAULT 0,
+        captured_at INTEGER NOT NULL
+      );
+      CREATE INDEX stories_taken ON stories (taken_at);
+      CREATE INDEX stories_user ON stories (user_id, taken_at);
+      CREATE INDEX stories_status ON stories (status);
+    `,
+  },
 ];
 
 export function openDb(file: string): DB {

@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import type { AuditEntry, SessionInfo, Settings, TotpSetupResponse } from '../../../shared/api';
+import type { AuditEntry, SessionInfo, Settings, StoryAccount, TotpSetupResponse } from '../../../shared/api';
 import { api, errorMessage } from '../api/client';
 import { Icon } from '../components/Icon';
 import { Avatar, ConfirmButton, ErrorNote, Spinner, TtStatePill } from '../components/ui';
@@ -377,9 +377,82 @@ function LoggingSection() {
         therefore re-reads the newest conversations every so often: a message that is no longer there stays in the log, marked
         &ldquo;Gone from TikTok&rdquo;. Fewer minutes means more TikTok traffic.
       </p>
+      <h3 className="settings-sub">Stories</h3>
+      <label className="check">
+        <input type="checkbox" checked={s.storyLogging} onChange={(e) => save({ storyLogging: e.target.checked })} /> Log stories of the accounts you follow
+      </label>
+      <div className="form narrow">
+        <label>
+          Check every (minutes)
+          <input
+            type="number"
+            min={15}
+            max={240}
+            disabled={!s.storyLogging}
+            defaultValue={s.storyIntervalMinutes}
+            onBlur={(e) => {
+              const v = Math.round(Number(e.target.value));
+              if (v >= 15 && v <= 240 && v !== s.storyIntervalMinutes) save({ storyIntervalMinutes: v });
+            }}
+          />
+        </label>
+        <label>
+          Keep stories for (days)
+          <input
+            type="number"
+            min={1}
+            max={365}
+            defaultValue={s.storyRetentionDays}
+            onBlur={(e) => {
+              const v = Math.round(Number(e.target.value));
+              if (v >= 1 && v <= 365 && v !== s.storyRetentionDays) save({ storyRetentionDays: v });
+            }}
+          />
+        </label>
+      </div>
+      <p className="muted small">
+        TikTok keeps a story for 24 hours. The stories bar is read through TikTok&rsquo;s own API, each photo and video is stored
+        encrypted, and nothing is marked as seen. Every check is spaced randomly around the interval so it never runs on an exact
+        schedule.
+      </p>
+      <StoryAccounts selected={s.storySelected} onChange={(ids) => save({ storySelected: ids })} />
       <ErrorNote error={a.error} />
       {a.ok ? <p className="ok-note">{a.ok}</p> : null}
     </Section>
+  );
+}
+
+/** Whose stories are logged: empty selection = every account seen in the stories bar. */
+function StoryAccounts({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
+  const [accounts, setAccounts] = useState<StoryAccount[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.storiesAccounts().then(setAccounts, (e) => setError(errorMessage(e)));
+  }, []);
+  const chosen = new Set(selected);
+  const toggle = (id: string) => {
+    const next = new Set(chosen);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange([...next]);
+  };
+  if (error) return <ErrorNote error={error} />;
+  if (!accounts) return <Spinner size={18} />;
+  if (!accounts.length) return <p className="muted small">No accounts seen yet: TikTok&rsquo;s stories bar fills in after the first check.</p>;
+  return (
+    <div className="story-picker">
+      <p className="muted small">
+        {selected.length ? `${selected.length} account(s) chosen` : 'Every account seen in the stories bar'} — untick to skip someone.
+      </p>
+      {accounts.map((a) => (
+        <label key={a.id} className="story-pick">
+          <input type="checkbox" checked={selected.length === 0 || chosen.has(a.id)} onChange={() => toggle(a.id)} />
+          {a.avatarUrl ? <img src={a.avatarUrl} alt="" /> : <span className="story-pick-dot" />}
+          <span>@{a.username ?? a.id.slice(-6)}</span>
+          <span className="muted small">{a.count}</span>
+        </label>
+      ))}
+    </div>
   );
 }
 
