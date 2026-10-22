@@ -194,6 +194,25 @@ function messageText(o: Obj): string | null {
   return null;
 }
 
+/**
+ * The JSON inside `content` when TikTok sent it as a string — the shape both the IM API answers and the socket frames
+ * use (`{"aweType":800,"itemId":…}`). Reading only `o.content.aweType` missed it and a shared video came out as an
+ * unreadable message.
+ */
+function contentObject(o: Obj): Obj {
+  for (const key of CONTENT_KEYS) {
+    const v = pick(o, key);
+    if (typeof v === 'string' && v.trim().startsWith('{')) {
+      try {
+        return JSON.parse(v) as Obj;
+      } catch {
+        /* not JSON: nothing to read */
+      }
+    } else if (isObj(v)) return v;
+  }
+  return {};
+}
+
 const TYPE_BY_AWE: Record<string, string> = {
   '700': 'text',
   '500': 'sticker',
@@ -202,6 +221,7 @@ const TYPE_BY_AWE: Record<string, string> = {
   '8': 'shared_post',
   '71': 'shared_post',
   '76': 'shared_post',
+  '800': 'shared_post',
 };
 
 /** Maps one candidate object to a message, or null when it is not one (or lacks what we need to store it). */
@@ -238,7 +258,8 @@ export function mapMessage(o: unknown, chatHint: string | null, ctx: MapContext)
   const media = mapMedia(o);
   let text = messageText(o);
   const typeName = (str(pick(o, 'type', 'msg_type', 'msgType', 'content_type', 'contentType')) ?? '').toLowerCase();
-  const awe = str(pick(o, 'aweType', 'awe_type', 'content.aweType'));
+  const inner = contentObject(o);
+  const awe = str(pick(o, 'aweType', 'awe_type')) ?? str(pick(inner, 'aweType', 'awe_type'));
   let type: string;
   if (typeName) type = /^[a-z0-9_.-]{1,32}$/.test(typeName) ? typeName : 'unknown';
   else if (media.length) type = media[0]!.kind === 'sticker' ? 'sticker' : 'media';
@@ -264,8 +285,14 @@ export function mapMessage(o: unknown, chatHint: string | null, ctx: MapContext)
   const key = dedupeKey({ threadId, senderId, ts, text, media, type });
   const id = serverId ?? syntheticId(key);
   const meta: Obj = {};
-  const shareTitle = str(pick(o, 'share_title', 'shareTitle', 'card_title', 'title'));
+  const shareTitle = str(pick(o, 'share_title', 'shareTitle', 'card_title', 'title')) ?? str(pick(inner, 'content_title', 'content_name', 'title'));
   if (shareTitle) meta.shareTitle = shareTitle;
+  // A shared post captured from a socket frame: the card needs TikTok's post id to be playable in the chat.
+  const itemId = str(pick(o, 'itemId', 'item_id', 'aweme_id')) ?? str(pick(inner, 'itemId', 'item_id', 'aweme_id'));
+  if (itemId && /^\d{6,24}$/.test(itemId)) {
+    meta.itemId = itemId;
+    meta.url = `https://www.tiktok.com/@_/video/${itemId}`;
+  }
   if (awe) meta.aweType = awe;
   if (text === null && media.length === 0) meta.unreadable = true;
   if (shareTitle || awe || meta.unreadable) meta.dedupeKey = key;

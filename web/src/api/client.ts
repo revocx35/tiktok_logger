@@ -33,6 +33,7 @@ import type {
   VncCredentials,
   TtStatus,
   TtDiagnostics,
+  TtItem,
   PageProbe,
   FeedItem,
   FeedComment,
@@ -184,6 +185,9 @@ export const api = {
   unsend: (messageId: string) => request<{ ok: true }>('POST', `/api/messages/${enc(messageId)}/unsend`),
   editMessage: (messageId: string, text: string) => request<{ ok: true }>('POST', `/api/messages/${enc(messageId)}/edit`, { text }),
   markRead: (chatId: string) => request<{ ok: true }>('POST', `/api/chats/${enc(chatId)}/read`),
+
+  /** One TikTok post (a chat's shared video or link): metadata, plus the app's own media routes. */
+  item: (id: string) => request<TtItem>('GET', `/api/items/${encodeURIComponent(id)}`),
 
   storiesStatus: () => request<StoryStatus>('GET', '/api/stories/status'),
   storiesCheck: () => request<StoryStatus>('POST', '/api/stories/check'),

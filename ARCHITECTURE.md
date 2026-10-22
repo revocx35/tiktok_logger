@@ -184,6 +184,36 @@ conversation every 2.5 s, import by opening conversations, infer unsends with th
 read-completeness guards described below and in `tt/ingest.ts`). The web API (`tt/web/api.ts`) is bound on the protocol path; stories and
 the API feed need it.
 
+### Chat post cards (`tt/items.ts`, `components/TikTokCard.tsx`)
+
+A shared video is a `shared_post` in the IM protocol (`aweType` 800: `itemId`, the author's `uid`, the card fields) and
+every such row is stored with that type. Two things were missing, and together they made a shared video look like "just
+a link" in the chat: the API cast the stored type straight into `MessageType` (so `shared_post` matched nothing in the
+web UI's render switch, and no share info was built), and nothing resolved the post itself.
+
+* `api/messageType.ts` translates the stored types (`shared_post` → `share`, `media` → `video`/`voice`/`image` by the
+  stored mime, `unsupported` → `unknown`) and builds the `ShareInfo` from the IM meta — `itemId`, the canonical URL
+  (`https://www.tiktok.com/@_/video/<id>` when only the id was kept), the post title as the card title. It is pure and
+  unit-tested; the mapping was the whole bug.
+* `tt/items.ts` resolves one post by id through the tab: `GET /api/item/detail/?itemId=…` (the call TikTok's own web
+  client makes). Live shape: `itemInfo.itemStruct` with `desc`, `author{uniqueId,nickname,id}`, `stats`, and
+  `video{playAddr,cover,duration,width,height}`; an id TikTok does not have answers 200 with `statusCode: 10204` and no
+  `itemStruct` → 404. Answers are cached 10 minutes (300 entries).
+* The video and the cover are downloaded **through the page** (the CDN needs the tab's cookies) into the same
+  byte-bounded cache the feed uses, and served by `/api/items/:id/media/{video,cover}` with `Content-Length`, Range
+  (206) and an ETag — a phone will not play a video that cannot be ranged. The signed CDN link never reaches the
+  browser.
+* The web card (`TikTokCard`) is used when a message has `share.itemId` **or** its text contains a TikTok video link
+  (`lib/ttLinks.ts`), which is what the send fallback produces when TikTok drops the card (see §4 sending). It resolves
+  only when the card scrolls into view (a chat can hold hundreds of shares), shows the cover and a play button, and
+  swaps in a ranged `<video>` on click. When the post cannot be resolved (deleted, private, region-locked) the card
+  degrades to a link out to TikTok.
+
+Limits, stated plainly: TikTok still **drops** the shared-post card the app sends (v1.9.4/1.9.5 verified it through the
+conversation read-back), so the recipient sees the canonical link in TikTok's own clients — the playable card is this
+app's view of that post. A short `vm.tiktok.com` link carries no id and is not followed (no outbound requests), so it
+stays a plain link. The Android client shows shares as text (it has no card yet).
+
 ### Story logging (`tt/stories.ts`)
 
 Off by default (`settings.storyLogging`). Own timer: the first pass three minutes after a worker becomes ready, then
@@ -337,7 +367,8 @@ Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (
 uses `GET /api/state`.
 
 Chat view: date separators; sender names in groups; text rendered as text (links and @mentions only, never HTML);
-quoted replies; media grid with lightbox, video player, audio player; shared-post cards with a link out; select
+quoted replies; media grid with lightbox, video player, audio player; a shared TikTok post (or a pasted TikTok link) as
+a card with the post's cover, author and a player (`components/TikTokCard.tsx`, see §4 "Chat post cards"); select
 photos/videos → one ZIP; infinite scroll; SSE live updates; per-chat and global search; composer with text, photo/video/
 audio and voice recording (MP4 or Ogg/Opus). Light and dark themes, single pane under 900 px.
 
@@ -498,6 +529,8 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | POST | /api/feed/:id/like | ✓ | `{like}` → `{liked}` (TikTok's own control) |
 | GET · POST | /api/feed/:id/comments · /api/feed/:id/comment | ✓ | `{comments}` · posts `{text}` (≤150) |
 | GET | /api/feed/media/:ref | ✓ | the video/poster/avatar from the server's cache, with `Content-Length`, Range (206) and an ETag |
+| GET | /api/items/:id | ✓ | `TtItem`: one post resolved through the tab (`/api/item/detail/?itemId=`), its media as app URLs |
+| GET | /api/items/:id/media/video · /media/cover | ✓ | the post's video (ranged, 206) or cover, downloaded once through the page and cached |
 | GET | /api/stories/status · /api/stories/authors · /api/stories/accounts · /api/stories?user=&before=&limit= | ✓ | story logging status, authors with items, every account seen in the bar, `StoryPage` |
 | POST | /api/stories/check | ✓ | runs a pass now (also while the schedule is off) |
 | GET | /api/chats | ✓ | `ChatSummary[]` |
@@ -538,8 +571,11 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
   anti-delete with its 60 s rule, reactions, own messages); `tt/im/` (wire codec, message shapes, engine import and
   catch-up); `tt/feedApi.test.ts` (the API feed and its comments); `tt/stories.test.ts` (tray/batch parsers over the
   live shapes, a photo story, an item without media, the delay bounds, stored-once, the retention sweep deleting story
-  and file, the encrypted identity, a manual check while the schedule is off).
-* `web` (12 tests): vitest for the text renderer and the Opus/OGG recorder, plus `pages/storiesCss.test.ts` —
+  and file, the encrypted identity, a manual check while the schedule is off); `tt/items.test.ts` (the live
+  `item/detail` shape, a photo post, a gone post, the media routes, caching) and `api/messageType.test.ts` (the stored
+  type → `MessageType` translation and the share card of a shared post).
+* `web` (16 tests): vitest for the text renderer, the Opus/OGG recorder and the TikTok link reader (`lib/ttLinks`),
+  plus `pages/storiesCss.test.ts` —
   every `story-*`/`page-*` class the markup uses has a rule in `styles.css` and every `story-*` rule is used by
   markup (a renamed class in a ported page is invisible to the type-check and the build); typecheck, production
   build.

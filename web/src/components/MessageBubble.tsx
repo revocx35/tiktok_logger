@@ -3,8 +3,10 @@ import type { Message, MessageEdit, MessageType } from '../../../shared/api';
 import { api, errorMessage } from '../api/client';
 import { colorFor, dayKey, formatDateTime, formatTime } from '../lib/format';
 import { TtText, safeHref } from '../lib/ttText';
+import { findTiktokVideo, isOnlyLink } from '../lib/ttLinks';
 import { Icon } from './Icon';
 import { MessageMedia } from './MessageMedia';
+import { TikTokCard } from './TikTokCard';
 import { ErrorNote, Modal, Spinner } from './ui';
 
 const QUOTE_LABEL: Partial<Record<MessageType, string>> = {
@@ -196,6 +198,13 @@ function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, 
     .filter(Boolean)
     .join(' ');
 
+  // A shared TikTok post (TikTok's own card, or our fallback link) and a TikTok link in the text both become a
+  // playable card: `share.itemId` from the IM card, else the id read out of the shared/typed link.
+  const shareId = msg.share?.itemId ?? (msg.share?.url ? findTiktokVideo(msg.share.url)?.id ?? null : null);
+  const textLink = msg.type === 'text' || msg.type === 'share' ? findTiktokVideo(msg.text) : null;
+  const linkId = textLink?.id ?? null;
+  const linkOnly = !!(textLink && isOnlyLink(msg.text, textLink.url));
+
   const rowClass = [msg.fromMe ? 'msg-row out' : 'msg-row in', selection ? 'selectable' : '', selection?.selected ? 'selected' : ''].filter(Boolean).join(' ');
   // While selecting, the whole row is one checkbox: clicks never reach the photo/video inside (CSS turns off
   // their pointer events), so nothing opens or plays by accident.
@@ -248,13 +257,22 @@ function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, 
         ) : null}
         {msg.album ? <div className="muted small">{`${msg.album.index + 1} of ${msg.album.count}`}</div> : null}
         <MessageMedia msg={msg} />
-        <ShareCard msg={msg} />
+        {shareId || linkId ? (
+          <TikTokCard
+            itemId={(shareId ?? linkId)!}
+            url={msg.share?.url ?? textLink?.url ?? null}
+            title={msg.share?.title ?? null}
+            caption={msg.share?.caption ?? null}
+          />
+        ) : (
+          <ShareCard msg={msg} />
+        )}
         {msg.music ? (
           <div className="music">
             <Icon name="music" size={18} /> <b>{msg.music.title ?? 'Song'}</b> {msg.music.artist ? <span className="muted">· {msg.music.artist}</span> : null}
           </div>
         ) : null}
-        {msg.text ? (
+        {msg.text && !linkOnly && !(shareId && msg.type === 'share') ? (
           <div className="text">
             <TtText text={msg.text} />
           </div>

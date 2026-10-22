@@ -79,6 +79,21 @@ describe('mapMessage', () => {
     expect(m!.media![0]!.kind).toBe('sticker');
   });
 
+  it('keeps the post id of a shared video, so the chat can play it', () => {
+    const m = mapMessage(
+      {
+        ...base,
+        message_id: 'm-share',
+        sender: { uid: '42' },
+        content: JSON.stringify({ aweType: 800, itemId: '7412345678901234567', uid: '42', content_title: 'a video' }),
+      },
+      null,
+      { meId: ME.id, now: NOW },
+    );
+    expect(m!.type).toBe('shared_post');
+    expect(m!.meta).toMatchObject({ itemId: '7412345678901234567', url: 'https://www.tiktok.com/@_/video/7412345678901234567' });
+  });
+
   it('maps a photo message with its dimensions', () => {
     const m = mapMessage(
       { ...base, message_id: 'm3', sender: { uid: '42' }, image: { url_list: ['https://p19.tiktokcdn.com/a.jpeg'], width: 1080, height: 1440 } },

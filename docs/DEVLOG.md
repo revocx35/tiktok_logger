@@ -1,5 +1,46 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.10.0: a shared video is a video, not a link
+
+Owner: "when i send a video it only is a link … also when i open a chat the video links are only shown as links i dont
+see videos".
+
+Two separate things were wrong, and the first one was a plain bug:
+
+* **Every shared post was invisible.** TikTok's IM protocol sends a shared video as `aweType` 800 and the row is stored
+  with `type = 'shared_post'`; `api/view.ts` cast that straight into `MessageType` (`row.type as MessageType`). The web
+  UI's render switch matched nothing, `share` was always `null`, and the message rendered as its title (or as nothing).
+  In the live log that is **1 873 rows** — the most common message type in the owner's chats. `api/messageType.ts` now
+  translates the stored types (`shared_post` → `share`, `media` → `video`/`voice`/`image` by the stored mime,
+  `unsupported` → `unknown`) and builds the `ShareInfo` from the IM meta (`itemId`, canonical URL, title). The frame
+  path had the same hole: `tt/mapper.ts` read `awe` from `content.aweType`, but `content` is a *JSON string* there, and
+  `TYPE_BY_AWE` had no `800` — `contentObject()` and the `800` entry fix both, and the post id/url are kept in meta.
+* **Nothing resolved a post**, so there was nothing to play. `tt/items.ts` calls TikTok's own
+  `GET /api/item/detail/?itemId=…` from the messages tab (probed live the same day; `aweme_id` is rejected with
+  `illegal itemID`, an unknown post answers 200 + `statusCode 10204` + no `itemStruct`), caches the answer 10 minutes,
+  and downloads the video/cover **through the page** (the CDN needs the tab's cookies) into the feed's kind of
+  byte-bounded cache. `/api/items/:id` + `/api/items/:id/media/{video,cover}` serve it with `Content-Length`, Range
+  (206) and an ETag — a phone will not play a video that cannot be ranged — and the signed CDN link never reaches the
+  browser. `api/ranged.ts` is now the one ranged sender (the feed's route uses it too).
+
+The web card (`components/TikTokCard.tsx`) appears when a message has `share.itemId` **or** its text holds a TikTok
+video link (`lib/ttLinks.ts` — the shape the send fallback produces), which is why the fallback link now plays too. It
+resolves only when it scrolls into view (`IntersectionObserver`, 200 px margin) and dedupes requests per post per
+session: a chat can hold hundreds of shares and every miss is a request through the tab. It shows the cover, author,
+duration and like/play counts; clicking swaps in the ranged `<video>`; a post that cannot be resolved (deleted,
+private, region-locked) degrades to a link out. The bubble's title is no longer printed twice under the card, and
+`width: min(300px, 100%)` on the card was replaced with `width: 300px; max-width: 100%` — the `min()`/percentage form
+made Chromium give the bubble an 85 %-wide max-content, so every card message became a balloon.
+
+**What cannot be fixed from here:** TikTok still drops the shared-post card the app sends (v1.9.4/1.9.5 proved it by
+reading the conversation back), so in TikTok's own clients the recipient sees the canonical link. What changed is this
+app's view: the post is a card you can play. Short `vm.tiktok.com` links carry no id and are not followed.
+
+Tests: `api/messageType.test.ts` (8 — the type translation, the card from meta/URL/TikTok's own fields, the id reader),
+`tt/items.test.ts` (7 — the live `item/detail` shape pruned from the probe, a photo post, a gone post, the media URLs,
+caching, a malformed id, TikTok not connected), a `mapMessage` case for the shared-post frame, `web/src/lib/ttLinks.test.ts`
+(4). Server 230, web 16, typecheck + build.
+
 ## 2026-10-22 — v1.9.6: the Stories page rendered half unstyled
 
 Owner: "the ui of the stories page is broken".

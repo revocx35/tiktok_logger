@@ -1,7 +1,8 @@
-import type { FeedComment, FeedItem, StoryStatus, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
+import type { FeedComment, FeedItem, StoryStatus, TtItem, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
 import type { Config } from './config.js';
 import type { SessionCookie } from './tt/cookies.js';
 import type { ShareArgs } from './tt/im/proto.js';
+import type { ResolvedItem } from './tt/items.js';
 import { Errors } from './errors.js';
 import { DataWriter } from './crypto/keyring.js';
 import type { Repo } from './db/repo.js';
@@ -55,6 +56,19 @@ export interface TtStories {
   sweep(): Promise<number>;
 }
 
+/** One TikTok post, for the chat's shared videos and pasted links (see tt/items.ts). */
+export interface TtItemsApi {
+  /** Resolves it through the logged-in tab (cached); throws not_found when TikTok does not have it. */
+  lookup(id: string): Promise<ResolvedItem>;
+  /** The video or cover bytes (downloaded once through the page). */
+  bytes(id: string, kind: 'video' | 'cover'): Promise<{ mime: string; data: Buffer } | null>;
+  cached(id: string, kind: 'video' | 'cover'): boolean;
+  /** The DTO the HTTP layer serves. */
+  dto(item: ResolvedItem): TtItem;
+  /** Forgets everything (logout, reconnect). */
+  reset(): void;
+}
+
 /** Control surface of the TikTok integration, used by the HTTP layer. */
 export interface TtController {
   status(): TtStatus;
@@ -78,6 +92,7 @@ export interface TtController {
   readonly sender: TtSender;
   readonly feed: TtFeed;
   readonly stories: TtStories;
+  readonly items: TtItemsApi;
 }
 
 export interface TtDiagnostics {
@@ -159,6 +174,15 @@ export class NullTt implements TtController {
     checkNow: notConnected,
     reconfigure: () => undefined,
     sweep: async () => 0,
+  };
+  readonly items: TtItemsApi = {
+    lookup: notConnected,
+    bytes: notConnected,
+    cached: () => false,
+    dto: () => {
+      throw Errors.unavailable('TikTok is not connected.');
+    },
+    reset: () => undefined,
   };
   readonly sender: TtSender = {
     sendText: notConnected,

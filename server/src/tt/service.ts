@@ -13,6 +13,7 @@ import { BrowserDownloader } from './download.js';
 import { FeedCatalog, FeedService } from './feed.js';
 import { ApiFeed } from './feedApi.js';
 import { StoryLogger } from './stories.js';
+import { TtItems } from './items.js';
 import { WebApi } from './web/api.js';
 import { Ingest, MediaSources } from './ingest.js';
 import { lookAtTab, nextLoginStep, setSessionCookies, steerTab } from './loginwatch.js';
@@ -80,6 +81,8 @@ export class TtService implements TtController, ChatDriver {
   private webApiRef: WebApi | null = null;
   /** Story logging (off by default); it reads the stories bar through the web API. */
   readonly stories: StoryLogger;
+  /** One post by id (chat cards): resolved through the web API, its media proxied from the page. */
+  readonly items: TtItems;
   /** Item ids and signed video URLs captured from the For You page's own JSON. */
   private readonly feedCatalog = new FeedCatalog();
   /** The For You tab (created on demand, kept for the session; never the messages tab). */
@@ -108,6 +111,7 @@ export class TtService implements TtController, ChatDriver {
     this.pageFeed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
     this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef);
     this.stories = new StoryLogger(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
+    this.items = new TtItems(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
     this.feed = routedFeed(() => (this.webApiRef ? this.apiFeed : null), this.pageFeed);
     this.sync = new Sync(ctx, {
       threads: () => this.readThreads(),
@@ -574,6 +578,7 @@ export class TtService implements TtController, ChatDriver {
     this.engineRef = null;
     this.webApiRef = null;
     this.apiFeed.reset();
+    this.items.reset();
     await this.run(async () => {
       await this.watcher?.detach().catch(() => undefined);
       await this.downloaderRef?.detach().catch(() => undefined);

@@ -4,6 +4,7 @@ import { registerChatRoutes } from './api/chats.js';
 import { registerEventRoutes } from './api/events.js';
 import { registerFeedRoutes } from './api/feed.js';
 import { registerStoryRoutes } from './api/stories.js';
+import { registerItemRoutes } from './api/items.js';
 import { registerInternalRoutes } from './api/internal.js';
 import { registerMediaRoutes } from './api/media.js';
 import { registerSendRoutes } from './api/send.js';
@@ -42,6 +43,7 @@ export async function createApp(
   registerMediaRoutes(app, ctx);
   registerFeedRoutes(app, ctx);
   registerStoryRoutes(app, ctx);
+  registerItemRoutes(app, ctx);
   registerSendRoutes(app, ctx);
   registerEventRoutes(app, ctx);
   registerAdminRoutes(app, ctx);

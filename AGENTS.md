@@ -20,9 +20,10 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 | `server/src/tt/web/api.ts`, `tt/feedApi.ts` | Feed/comments/likes through the web API from the messages tab (page-driving `feed.ts` is the fallback) |
 | `server/src/tt/im/` | IM protocol in the tab: `wire.ts`, `proto.ts`, `engine.ts` (import, catch-up, unsend, send, profiles), `transport.ts` |
 | `server/src/tt/stories.ts`, `api/stories.ts` | Story logging (stories-bar + batch parsers, timer, media, retention) and its routes |
+| `server/src/tt/items.ts`, `api/items.ts`, `api/messageType.ts` | One TikTok post by id for the chat cards (resolved through the tab, media proxied + ranged) and the stored-type → `MessageType` / share-card mapping |
 | `server/src/tt/` | TikTok layer: `service.ts` (lifecycle, timers, tabs), `dom.ts` (messages page agent), `sender.ts`, `watcher.ts` (CDP capture), `frames.ts`/`mapper.ts`/`ingest.ts`, `feed.ts` (+`FeedCatalog`) / `feedAgent.ts` / `feedMedia.ts`, `download.ts`, `loginwatch.ts`, `cookies.ts` |
-| `server/src/api/` | Routes: chats, media, send, feed, stories, admin, settings, audit, SSE |
-| `web/src/` | React UI (`pages/Feed.tsx`, `pages/Stories.tsx`, `ChatView.tsx`, `Settings.tsx`, …) |
+| `server/src/api/` | Routes: chats, media, send, feed, items, stories, admin, settings, audit, SSE |
+| `web/src/` | React UI (`pages/Feed.tsx`, `pages/Stories.tsx`, `ChatView.tsx`, `Settings.tsx`, …); `components/TikTokCard.tsx` is the playable post card in a chat |
 | `chromium/` | Chromium image + Go manager (per-user browsers, token-checked CDP relay, VNC tunnel) |
 | `caddy/`, `deploy/`, `scripts/setup.sh` | TLS proxy, prebuilt-image compose, `.env` generator |
 | `scripts/dev/` | Fake TikTok (`fake-tiktok.mts`), `dom-check.mts`, `service-check.mts` (need a Chromium) |

@@ -204,10 +204,37 @@ export interface ShareInfo {
   subtitle: string | null;
   /** Caption of the shared video (when TikTok sends it). */
   caption: string | null;
-  /** Where it points (a tiktok.com video/profile/live page or an external link). Never fetched by the server. */
+  /** Where it points (a tiktok.com video/profile/live page or an external link). */
   url: string | null;
   /** Small text above a reply ("Replied to a comment", "Shared with you"). */
   eyebrow: string | null;
+  /**
+   * TikTok's post id when the share is a video or photo post (from the IM card, or from the URL). The UI uses it to
+   * show the post as a playable card (`GET /api/items/<id>`) instead of a bare link.
+   */
+  itemId?: string | null;
+}
+
+/**
+ * `GET /api/items/:id`: one TikTok post, resolved through the logged-in tab (the chat's shared videos and links).
+ * `videoUrl`/`coverUrl` are this app's own routes (ranged, cached, proxied through the page) — the signed TikTok CDN
+ * link never reaches the browser.
+ */
+export interface TtItem {
+  id: string;
+  /** Canonical https://www.tiktok.com/@user/video/<id>. */
+  url: string;
+  desc: string | null;
+  author: { id: string | null; username: string | null; name: string | null; avatarUrl: string | null };
+  stats: { likes: number | null; comments: number | null; shares: number | null; plays: number | null };
+  durationSec: number | null;
+  width: number | null;
+  height: number | null;
+  /** Playable video (null for a photo post, or when TikTok gave no play address). */
+  videoUrl: string | null;
+  coverUrl: string | null;
+  /** True when the bytes are already cached (the card can show the cover without a download). */
+  ready: boolean;
 }
 
 export interface MusicInfo { title: string | null; artist: string | null }

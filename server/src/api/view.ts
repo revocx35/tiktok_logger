@@ -3,6 +3,7 @@ import type { AppContext } from '../context.js';
 import type { DataReader } from '../crypto/keyring.js';
 import { F, type ChatListRow, type ChatRow, type ContactRow, type MessageRow } from '../db/repo.js';
 import type { MusicInfo, ShareInfo } from '../../../shared/api.js';
+import { apiType, shareInfo } from './messageType.js';
 
 const PREVIEW_LEN = 120;
 const MEDIA_TYPES = new Set<MessageType>(['image', 'video', 'voice', 'sticker']);
@@ -21,6 +22,10 @@ export interface MessageMeta {
   /** Header of a share card. */
   shareTitle?: string;
   aweType?: string;
+  /** Shared post (IM `aweType` 800): TikTok's post id, its author and the canonical link. */
+  itemId?: string;
+  uid?: string;
+  url?: string;
   /** Nothing readable could be extracted (stored so it is visible that something was sent). */
   unreadable?: boolean;
 }
@@ -119,9 +124,16 @@ export class Presenter {
     return null;
   }
 
+  /** The stored media's mime type, decrypted (null when there is no media row or it is not readable yet). */
+  private mediaMime(row: MessageRow): string | null {
+    if (row.media_id === null) return null;
+    const m = this.ctx.repo.getMedia(row.media_id);
+    return m ? this.reader.tryText(...F.mediaMime(m.path), m.mime_enc) : null;
+  }
+
   private media(row: MessageRow): MediaInfo | null {
     const status = row.media_status as MediaStatus;
-    const hasMedia = status !== 'none' || row.media_id !== null || MEDIA_TYPES.has(row.type as MessageType);
+    const hasMedia = status !== 'none' || row.media_id !== null || MEDIA_TYPES.has(apiType(row.type, this.mediaMime(row)));
     if (!hasMedia) return null;
     let mime: string | null = null;
     let filename: string | null = null;
@@ -188,11 +200,12 @@ export class Presenter {
           id: qrow?.id ?? null,
           senderName: fromMe ? 'You' : senderId ? this.contactName(senderId) : null,
           fromMe,
-          type: (qrow?.type as MessageType | undefined) ?? q?.type ?? 'text',
+          type: qrow ? apiType(qrow.type, this.mediaMime(qrow)) : q?.type ?? 'text',
           // The logged copy when we have it (it may have been unsent since), else TikTok's snapshot.
           text: qrow ? this.text(qrow, null) : q?.text ?? null,
         };
       }
+      const type = apiType(row.type, this.mediaMime(row));
       const msg: Message = {
         id: row.id,
         chatId: row.chat_id,
@@ -201,11 +214,11 @@ export class Presenter {
         senderUsername: row.sender_id ? this.username(row.sender_id) : null,
         fromMe: !!row.from_me,
         ts: row.ts,
-        type: row.type as MessageType,
+        type,
         text: this.text(row, meta),
         media: this.media(row),
         quoted,
-        share: meta?.share ?? null,
+        share: shareInfo(type, this.text(row, meta), meta),
         music: meta?.music ?? null,
         mentions: (meta?.mentions ?? []).map((id) => ({ id, name: this.contactName(id) })),
         forwarded: !!row.is_forwarded,
@@ -228,13 +241,15 @@ export class Presenter {
   preview(row: MessageRow): MessagePreview {
     const meta = this.meta(row);
     let text = this.text(row, meta);
-    const label = TYPE_LABEL[row.type as MessageType];
-    if (!text) text = row.type === 'share' && meta?.share?.kind ? `↗ ${meta.share.kind}` : label ?? null;
-    else if (label && row.type !== 'system') text = `${label} · ${text}`;
+    const type = apiType(row.type, this.mediaMime(row));
+    const label = TYPE_LABEL[type];
+    const share = shareInfo(type, text, meta);
+    if (!text) text = share?.kind ? `↗ ${share.kind}` : label ?? null;
+    else if (label && type !== 'system') text = `${label} · ${text}`;
     if (text && text.length > PREVIEW_LEN) text = `${text.slice(0, PREVIEW_LEN - 1)}…`;
     return {
       id: row.id,
-      type: row.type as MessageType,
+      type,
       fromMe: !!row.from_me,
       senderName: row.from_me ? 'You' : row.sender_id ? this.contactName(row.sender_id) : null,
       text,

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const SRC = fileURLToPath(new URL('../', import.meta.url));
-const CLASS = /^(?:stories|story|page)-[a-z-]+$/;
+const CLASS = /^(?:stories|story|page|tt-card)-[a-z-]*$/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -56,7 +56,7 @@ describe('stories CSS', () => {
   });
 
   it('uses every story class styles.css declares', () => {
-    const declared = new Set([...css.matchAll(/\.(stories?-[a-z-]+)/g)].map((m) => m[1]!));
+    const declared = new Set([...css.matchAll(/\.((?:stories?|tt-card)-[a-z-]+)/g)].map((m) => m[1]!));
     const dead = [...declared].filter((cls) => !used.has(cls)).sort();
     expect(dead, `declared in styles.css but no markup uses: ${dead.join(', ')}`).toEqual([]);
   });

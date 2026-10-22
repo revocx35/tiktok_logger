@@ -4,7 +4,7 @@ import type { FeedCommentPage, FeedItem } from '../../../shared/api.js';
 import type { AppContext } from '../context.js';
 import { Errors } from '../errors.js';
 import { CHAT_ID_PATTERN } from './ids.js';
-import { parseRange } from './media.js';
+import { sendCached } from './ranged.js';
 
 /**
  * The For You feed: browsing, liking, comments and the video stream. All of it is done by the server's browser; these
@@ -78,27 +78,6 @@ export function registerFeedRoutes(app: FastifyInstance, ctx: AppContext): void 
     const { ref } = RefParam.parse(req.params);
     const f = await ctx.tt.feed.mediaOf(ref);
     if (!f) throw Errors.notFound('Media');
-    const size = f.data.length;
-    const cacheable = ctx.tt.feed.mediaCached(ref);
-    reply
-      .header('content-type', f.mime)
-      .header('cache-control', cacheable ? 'private, max-age=3600' : 'private, max-age=60')
-      .header('x-content-type-options', 'nosniff')
-      .header('accept-ranges', 'bytes')
-      .header('etag', `"${ref}-${size}"`);
-    const range = parseRange(req.headers.range, size);
-    if (range === 'invalid') {
-      reply.code(416).header('content-range', `bytes */${size}`);
-      return reply.send();
-    }
-    if (!range) {
-      reply.header('content-length', String(size));
-      return reply.send(f.data);
-    }
-    reply
-      .code(206)
-      .header('content-range', `bytes ${range.start}-${range.end}/${size}`)
-      .header('content-length', String(range.end - range.start + 1));
-    return reply.send(f.data.subarray(range.start, range.end + 1));
+    return sendCached(req, reply, f, ref, ctx.tt.feed.mediaCached(ref));
   });
 }
