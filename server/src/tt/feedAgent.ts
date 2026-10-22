@@ -141,6 +141,51 @@ const AGENT = String.raw`
     return false;
   };
 
+  let hydrationMap = null;
+  let hydrationAt = 0;
+  /** id -> item struct, from the page's rehydration JSON (TikTok bundles the feed's items with the document). */
+  const hydrationItems = () => {
+    const now = nowMs();
+    if (hydrationMap && now - hydrationAt < 20_000) return hydrationMap;
+    const map = new Map();
+    const el = document.querySelector('#__UNIVERSAL_DATA_FOR_REHYDRATION__');
+    const text = el && el.textContent ? el.textContent : '';
+    if (text && text.length < 4_000_000) {
+      try {
+        const walk = (node, depth) => {
+          if (!node || typeof node !== 'object' || depth > 8 || map.size > 400) return;
+          if (Array.isArray(node)) { for (const v of node) walk(v, depth + 1); return; }
+          if (node.id && /^\d{6,24}$/.test(String(node.id)) && (node.video || node.stats)) map.set(String(node.id), node);
+          for (const k of Object.keys(node)) if (node[k] && typeof node[k] === 'object') walk(node[k], depth + 1);
+        };
+        walk(JSON.parse(text), 0);
+      } catch (e) {
+        /* a truncated payload is not fatal: the DOM alone still works */
+      }
+    }
+    hydrationMap = map;
+    hydrationAt = now;
+    return map;
+  };
+
+  /** What the bundled item struct knows and the DOM does not: the signed video URL and its cover. */
+  const detailsFor = (id) => {
+    if (!id) return null;
+    const it = hydrationItems().get(String(id));
+    if (!it) return null;
+    const v = it.video || {};
+    return {
+      playAddr: typeof v.playAddr === 'string' ? v.playAddr : null,
+      cover: typeof v.cover === 'string' ? v.cover : null,
+      desc: typeof it.desc === 'string' ? it.desc : null,
+      music: it.music && typeof it.music.title === 'string' ? it.music.title : null,
+      likes: typeof it.stats?.diggCount === 'number' ? it.stats.diggCount : null,
+      comments: typeof it.stats?.commentCount === 'number' ? it.stats.commentCount : null,
+      shares: typeof it.stats?.shareCount === 'number' ? it.stats.shareCount : null,
+      plays: typeof it.stats?.playCount === 'number' ? it.stats.playCount : null,
+    };
+  };
+
   const current = () => {
     const el = currentEl();
     if (!el) return null;
@@ -159,6 +204,7 @@ const AGENT = String.raw`
     const r = video ? video.getBoundingClientRect() : el.getBoundingClientRect();
     return {
       id,
+      details: detailsFor(id),
       href: videoLink(el),
       author: {
         username: username || null,
@@ -318,6 +364,17 @@ export function mergeFeedSelectors(extra?: Record<string, string[]> | null): Fee
 /** What the page reports about the video in view. */
 export interface RawFeedItem {
   id: string | null;
+  /** Straight from the page's bundled item struct: signed video URL, cover, exact stats. */
+  details: {
+    playAddr: string | null;
+    cover: string | null;
+    desc: string | null;
+    music: string | null;
+    likes: number | null;
+    comments: number | null;
+    shares: number | null;
+    plays: number | null;
+  } | null;
   href: string | null;
   author: { username: string | null; name: string | null; avatar: string | null };
   caption: string | null;

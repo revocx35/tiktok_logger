@@ -257,11 +257,13 @@ export class FeedService {
 
   private toItem(raw: RawFeedItem): FeedItem {
     // The DOM cannot name the item (no link) and cannot give its video (MSE `blob:` source); the captured item list can.
+    // Three sources, best first: the page's own bundled item struct (exact), the captured item list, then the DOM.
     const known = this.catalog?.byIdLookup(raw.id) ?? this.catalog?.find(raw.author.username, raw.caption) ?? null;
+    const details = raw.details;
     const id = raw.id ?? known?.id ?? syntheticItemId(raw);
     const domSrc = raw.video?.src && !raw.video.src.startsWith('blob:') ? raw.video.src : null;
-    const src = domSrc ?? known?.playAddr ?? null;
-    const posterSrc = raw.video?.poster ?? known?.cover ?? null;
+    const src = domSrc ?? details?.playAddr ?? known?.playAddr ?? null;
+    const posterSrc = raw.video?.poster ?? details?.cover ?? known?.cover ?? null;
     const video = src ? this.register(src, 'video/mp4') : null;
     const poster = posterSrc ? this.register(posterSrc, 'image/jpeg') : null;
     const avatar = raw.author.avatar ? this.register(raw.author.avatar, 'image/jpeg') : null;
@@ -270,13 +272,13 @@ export class FeedService {
       id,
       url: raw.href ? absolute(raw.href, this.origin) : `${this.origin}/@${raw.author.username ?? ''}/video/${id}`,
       author: { username: raw.author.username, name: raw.author.name, avatar },
-      caption: raw.caption ?? known?.desc ?? null,
-      music: raw.music ?? known?.music ?? null,
+      caption: raw.caption ?? details?.desc ?? known?.desc ?? null,
+      music: raw.music ?? details?.music ?? known?.music ?? null,
       stats: {
-        likes: pick(raw.stats.likes, known?.likes),
-        comments: pick(raw.stats.comments, known?.comments),
-        shares: pick(raw.stats.shares, known?.shares),
-        plays: pick(raw.stats.plays, known?.plays),
+        likes: pick(raw.stats.likes, details?.likes ?? known?.likes),
+        comments: pick(raw.stats.comments, details?.comments ?? known?.comments),
+        shares: pick(raw.stats.shares, details?.shares ?? known?.shares),
+        plays: pick(raw.stats.plays, details?.plays ?? known?.plays),
       },
       liked: raw.liked,
       video: src || poster ? { src: video, poster, muted: raw.video?.muted ?? false, playing: raw.video?.playing ?? false } : null,
