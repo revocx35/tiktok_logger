@@ -715,9 +715,19 @@ export class TtService implements TtController, ChatDriver {
       const snap = await this.snapshot().catch(() => null);
       if (snap && this.chatKeyFor(snap.threadId) === chatId) return;
     }
-    const key = this.chatKeys.get(chatId) ?? chatId;
-    const res = await this.run(() => a.openThread(key));
-    if (!res.ok) throw new AppError(409, 'chat_closed', 'That conversation could not be opened in TikTok. Open it once on the TikTok screen, then try again.');
+    // Try the id first (exact, and the same key the chat list was built from), then the stored name. Using only the
+    // name broke as soon as a row's first line differed from what was stored (renamed chats, group sender names).
+    const name = this.chatKeys.get(chatId) ?? null;
+    const keys = name && name !== chatId ? [chatId, name] : [chatId];
+    let opened = false;
+    for (const key of keys) {
+      const res = await this.run(() => a.openThread(key));
+      if (res.ok) {
+        opened = true;
+        break;
+      }
+    }
+    if (!opened) throw new AppError(409, 'chat_closed', 'That conversation could not be opened in TikTok. Open it once on the TikTok screen, then try again.');
     this.ctx.repo.bumpChatTs(chatId, 0, Date.now());
     // Wait for TikTok to render the conversation (it also marks it read).
     for (let i = 0; i < 20; i++) {

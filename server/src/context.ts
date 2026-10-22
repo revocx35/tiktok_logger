@@ -24,6 +24,10 @@ export interface TtSender {
 /** The For You feed (its own tab; browsing only, nothing is stored). */
 export interface TtFeed {
   current(): Promise<FeedItem | null>;
+  /** The video in view plus the next few, for a swiping client. */
+  window(limit?: number): Promise<{ items: FeedItem[]; current: string | null }>;
+  /** Moves the remote page to a video the client swiped to. */
+  goto(id: string): Promise<{ items: FeedItem[]; current: string | null }>;
   step(dir: 'next' | 'prev'): Promise<FeedItem>;
   like(id: string, want: boolean): Promise<{ liked: boolean }>;
   comments(id: string): Promise<FeedComment[]>;
@@ -121,6 +125,8 @@ export class NullTt implements TtController {
   private readonly since = Date.now();
   readonly feed: TtFeed = {
     current: async () => null,
+    window: async () => ({ items: [], current: null }),
+    goto: notConnected,
     step: notConnected,
     like: notConnected,
     comments: notConnected,

@@ -4,7 +4,7 @@ import type { AppContext } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import { BrowserDownloader } from './download.js';
 import { FeedMedia, refOf, type Fetched } from './feedMedia.js';
-import { FeedAgent, mergeFeedSelectors, type RawFeedItem } from './feedAgent.js';
+import { FeedAgent, mergeFeedSelectors, type RawFeedItem, type RawQueueItem } from './feedAgent.js';
 
 /**
  * TikTok's For You feed, browsed through the server's browser.
@@ -282,6 +282,85 @@ export class FeedService {
       },
       liked: raw.liked,
       video: src || poster ? { src: video, poster, muted: raw.video?.muted ?? false, playing: raw.video?.playing ?? false } : null,
+    };
+  }
+
+  /* ----------------------------------------------------------------- window */
+
+  /**
+   * The videos the UI should have on screen: the one in view plus the next few, so the web and the Android client can
+   * swipe through them with their own scroller (that is what gives the animation and the momentum) while the remote
+   * page stays where the UI is.
+   */
+  async window(limit = 3): Promise<{ items: FeedItem[]; current: string | null }> {
+    return this.run(async () => {
+      const agent = await this.ensureAgent();
+      const raw = await agent.current().catch(() => null);
+      const items: FeedItem[] = [];
+      if (raw) items.push(this.toItem(raw));
+      const queue = await agent.queue(limit + 2).catch(() => []);
+      for (const q of queue) {
+        if (items.length >= limit) break;
+        if (raw?.id && q.id === raw.id) continue;
+        const item = this.fromQueue(q);
+        if (item && !items.some((i) => i.id === item.id)) items.push(item);
+      }
+      void agent.hold().catch(() => undefined);
+      void this.warmAhead(agent);
+      return { items, current: raw?.id ?? null };
+    });
+  }
+
+  /** Brings the video the UI swiped to back on screen (the page may have moved on), then returns a fresh window. */
+  async goto(id: string): Promise<{ items: FeedItem[]; current: string | null }> {
+    return this.run(async () => {
+      const agent = await this.ensureAgent();
+      const res = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
+      if (!res.ok) throw new AppError(409, 'feed_moved', 'That video is not in the feed any more. Reload the feed.');
+      await sleep(400);
+      await agent.hold().catch(() => undefined);
+      const raw = await agent.current().catch(() => null);
+      const items: FeedItem[] = [];
+      if (raw) items.push(this.toItem(raw));
+      const queue = await agent.queue(6).catch(() => []);
+      for (const q of queue) {
+        if (items.length >= 3) break;
+        if (raw?.id && q.id === raw.id) continue;
+        const item = this.fromQueue(q);
+        if (item && !items.some((i) => i.id === item.id)) items.push(item);
+      }
+      this.lastId = raw?.id ?? this.lastId;
+      void this.warmAhead(agent);
+      return { items, current: raw?.id ?? null };
+    });
+  }
+
+  /** A feed item built from the page's list (not from the video in view): used for the items ahead. */
+  private fromQueue(q: RawQueueItem): FeedItem | null {
+    const known = this.catalog?.byIdLookup(q.id) ?? null;
+    const id = q.id ?? (q.author ? `f:${q.author}:${(q.caption ?? '').slice(0, 24).replace(/\s+/g, '_') || 'video'}` : null);
+    if (!id) return null;
+    const src = q.playAddr ?? known?.playAddr ?? null;
+    const posterSrc = q.cover ?? known?.cover ?? null;
+    const pick = (...xs: (number | null | undefined)[]): number | null => xs.find((x) => typeof x === 'number') ?? null;
+    return {
+      id,
+      url: `${this.origin}/@${q.author ?? ''}/video/${id}`,
+      author: {
+        username: q.author,
+        name: q.authorName,
+        avatar: q.avatar ? this.media.ref(q.avatar) : null,
+      },
+      caption: q.caption ?? q.desc ?? known?.desc ?? null,
+      music: q.music ?? q.dMusic ?? known?.music ?? null,
+      stats: {
+        likes: pick(q.stats.likes, q.dLikes, known?.likes),
+        comments: pick(q.stats.comments, q.dComments, known?.comments),
+        shares: pick(q.stats.shares, q.dShares, known?.shares),
+        plays: pick(q.stats.plays, q.dPlays, known?.plays),
+      },
+      liked: q.liked,
+      video: src || posterSrc ? { src: src ? this.media.ref(src) : null, poster: posterSrc ? this.media.ref(posterSrc) : null, muted: true, playing: false } : null,
     };
   }
 

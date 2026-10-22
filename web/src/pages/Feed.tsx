@@ -5,38 +5,65 @@ import { Icon } from '../components/Icon';
 import { Avatar, ErrorNote, Modal, Spinner } from '../components/ui';
 import { formatCount } from '../lib/format';
 
+/** How many videos ahead of the one on screen are fetched (and preloaded) at a time. */
+const WINDOW = 3;
+/** Slides this close to the active one get their video source attached, so a swipe starts playing at once. */
+const NEAR = 1;
+
 /**
  * TikTok's For You feed inside tiktok_logger.
  *
- * The videos are streamed through the server's browser (never from TikTok's CDN directly, so the signed links stay on
- * the server), likes/comments are done by clicking TikTok's own controls, and sharing is just the canonical video link
- * sent into one of the logged conversations.
+ * The videos come through the server (never from TikTok's CDN, so the signed links stay there) and are cached there.
+ * The swiping is a native snapping scroller — the same thing insta_logger's Reels use — which is what gives the
+ * momentum and the snap animation on a phone and the wheel/keyboard behaviour on a desktop. The remote TikTok page is
+ * moved to whatever slide the user settles on, so likes and comments always act on the video in view.
  */
 export function FeedPage() {
-  const [item, setItem] = useState<FeedItem | null>(null);
+  const [items, setItems] = useState<FeedItem[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [commentsFor, setCommentsFor] = useState<FeedItem | null>(null);
   const [comments, setComments] = useState<FeedComment[] | null>(null);
-  const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [sending, setSending] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+  const [shareFor, setShareFor] = useState<FeedItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [videoReady, setVideoReady] = useState(false);
-  const [videoError, setVideoError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  /** The video the remote page is on, so a goto is only sent when the user really moved. */
+  const serverId = useRef<string | null>(null);
+  const gotoSeq = useRef(0);
+  const itemsRef = useRef<FeedItem[]>([]);
+  itemsRef.current = items;
+
+  /** Puts a fresh window into the list without disturbing what is already rendered above. */
+  const apply = useCallback((r: { items: FeedItem[]; current: string | null }) => {
+    if (r.current) serverId.current = r.current;
+    setItems((old) => {
+      const merged = old.slice();
+      for (const it of r.items) {
+        const at = merged.findIndex((o) => o.id === it.id);
+        if (at >= 0) merged[at] = { ...merged[at]!, ...it };
+        else merged.push(it);
+      }
+      return merged.slice(0, 40);
+    });
+    setActiveId((cur) => cur ?? r.current ?? r.items[0]?.id ?? null);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.feed();
-      setItem(r.item);
+      const r = await api.feedWindow(WINDOW);
+      setItems(r.items);
+      setActiveId(r.current ?? r.items[0]?.id ?? null);
+      serverId.current = r.current;
       setError(null);
+      scroller.current?.scrollTo({ top: 0 });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -48,30 +75,32 @@ export function FeedPage() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    setVideoReady(false);
-    setVideoError(null);
-  }, [item?.id, reloadKey]);
-
-  const step = useCallback(
-    async (dir: 'next' | 'prev') => {
-      if (busy) return;
+  /** The user settled on a slide: move the remote page there and pull the next videos in. */
+  const sync = useCallback(
+    async (id: string) => {
+      if (!id || id === serverId.current) return;
+      const seq = ++gotoSeq.current;
       setBusy(true);
-      setCommentsOpen(false);
-      setComments(null);
-      setCommentsError(null);
       try {
-        const r = await api.feedStep(dir);
-        setItem(r.item);
+        const r = await api.feedGoto(id);
+        if (seq !== gotoSeq.current) return;
+        apply(r);
         setError(null);
       } catch (e) {
-        setError(errorMessage(e));
+        if (seq === gotoSeq.current) setError(errorMessage(e));
       } finally {
-        setBusy(false);
+        if (seq === gotoSeq.current) setBusy(false);
       }
     },
-    [busy],
+    [apply],
   );
+
+  const step = useCallback((dir: 'next' | 'prev') => {
+    const el = scroller.current;
+    if (!el) return;
+    const h = el.clientHeight;
+    el.scrollBy({ top: dir === 'next' ? h : -h, behavior: 'smooth' });
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -79,33 +108,33 @@ export function FeedPage() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement | null)?.isContentEditable) return;
       if (e.key === 'ArrowDown' || e.key === 'j') {
         e.preventDefault();
-        void step('next');
+        step('next');
       } else if (e.key === 'ArrowUp' || e.key === 'k') {
         e.preventDefault();
-        void step('prev');
-      } else if (e.key === 'Escape') {
-        setComments(null);
+        step('prev');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [step]);
 
-  const like = async () => {
-    if (!item || busy) return;
+  const like = async (item: FeedItem) => {
     const want = !item.liked;
-    setItem({ ...item, liked: want, stats: { ...item.stats, likes: item.stats.likes === null ? null : item.stats.likes + (want ? 1 : -1) } });
+    setItems((old) =>
+      old.map((i) =>
+        i.id === item.id ? { ...i, liked: want, stats: { ...i.stats, likes: i.stats.likes === null ? null : i.stats.likes + (want ? 1 : -1) } } : i,
+      ),
+    );
     try {
       const r = await api.feedLike(item.id, want);
-      setItem((cur) => (cur ? { ...cur, liked: r.liked } : cur));
+      setItems((old) => old.map((i) => (i.id === item.id ? { ...i, liked: r.liked } : i)));
     } catch (e) {
-      setItem((cur) => (cur ? { ...cur, liked: !want } : cur));
+      setItems((old) => old.map((i) => (i.id === item.id ? { ...i, liked: !want } : i)));
       setError(errorMessage(e));
     }
   };
 
-  const loadComments = async () => {
-    if (!item) return;
+  const loadComments = async (item: FeedItem) => {
     setCommentsLoading(true);
     setCommentsError(null);
     try {
@@ -118,15 +147,14 @@ export function FeedPage() {
     }
   };
 
-  const openComments = () => {
-    if (!item) return;
-    setCommentsOpen(true);
+  const openComments = (item: FeedItem) => {
+    setCommentsFor(item);
     setComments(null);
-    void loadComments();
+    void loadComments(item);
   };
 
   const closeComments = () => {
-    setCommentsOpen(false);
+    setCommentsFor(null);
     setComments(null);
     setCommentsError(null);
     setCommentText('');
@@ -134,133 +162,79 @@ export function FeedPage() {
   };
 
   const postComment = async () => {
-    if (!item || !commentText.trim() || sending) return;
+    if (!commentsFor || !commentText.trim() || sending) return;
     setSending(true);
     try {
-      const r = await api.feedComment(item.id, commentText.trim());
+      const r = await api.feedComment(commentsFor.id, commentText.trim());
       setComments(r.comments);
       setCommentText('');
-      setError(null);
       setNotice('Comment posted.');
     } catch (e) {
-      setError(errorMessage(e));
+      setCommentsError(errorMessage(e));
     } finally {
       setSending(false);
     }
   };
 
+  const activeIndex = Math.max(0, items.findIndex((i) => i.id === activeId));
+
   return (
     <div className="feed">
-      <div className="feed-stage">
-        {loading ? (
-          <div className="feed-loading">
-            <Spinner size={34} />
-            <p>Opening the feed in the server's browser…</p>
-          </div>
-        ) : item ? (
-          <>
-            {item.video?.poster ? <img className="feed-poster" src={item.video.poster} alt="" aria-hidden="true" /> : null}
-            <video
-              key={`${item.id}:${reloadKey}`}
-              ref={videoRef}
-              className={videoReady ? 'feed-video ready' : 'feed-video'}
-              src={item.video?.src ?? undefined}
-              poster={item.video?.poster ?? undefined}
-              autoPlay
-              loop
-              playsInline
-              preload="auto"
+      {loading && !items.length ? (
+        <div className="feed-loading">
+          <Spinner size={34} />
+          <p>Opening the feed in the server's browser…</p>
+        </div>
+      ) : !items.length ? (
+        <div className="feed-loading">
+          <Icon name="video" size={36} />
+          <p>No video could be read from the feed.</p>
+          <button className="btn" onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
+      ) : (
+        <div className="feed-window" ref={scroller}>
+          {items.map((item, i) => (
+            <Slide
+              key={item.id}
+              item={item}
+              active={item.id === activeId}
+              near={Math.abs(i - activeIndex) <= NEAR}
               muted={muted}
-              onCanPlay={() => setVideoReady(true)}
-              onPlaying={() => setVideoReady(true)}
-              onError={() => setVideoError('The video could not be played.')}
-              onClick={() => setMuted((m) => !m)}
+              onVisible={(id) => {
+                setActiveId(id);
+                void sync(id);
+              }}
+              onLike={() => void like(item)}
+              onComments={() => openComments(item)}
+              onShare={() => setShareFor(item)}
+              onToggleMute={() => setMuted((m) => !m)}
             />
-            {item.video?.src && !videoReady && !videoError ? (
-              <div className="feed-video-loading">
-                <Spinner size={26} />
-              </div>
-            ) : null}
-            {!item.video?.src || videoError ? (
-              <div className="feed-no-video">
-                <Icon name="video" size={36} />
-                <p>{videoError ?? 'This video has no playable source yet.'}</p>
-                <div className="feed-no-video-actions">
-                  <button className="btn" onClick={() => setReloadKey((k) => k + 1)}>
-                    Play again
-                  </button>
-                  <button className="btn ghost" onClick={() => void load()}>
-                    Reload the feed
-                  </button>
-                </div>
-              </div>
-            ) : null}
+          ))}
+        </div>
+      )}
 
-            <div className="feed-overlay">
-              <div className="feed-meta">
-                {item.author.username ? <a className="feed-author" href={item.url} target="_blank" rel="noopener noreferrer">@{item.author.username}</a> : null}
-                {item.caption ? <p className="feed-caption">{item.caption}</p> : null}
-                {item.music ? (
-                  <p className="feed-music">
-                    <Icon name="music" size={14} /> {item.music}
-                  </p>
-                ) : null}
-                <p className="feed-stats">
-                  {formatCount(item.stats.plays)} plays · {formatCount(item.stats.likes)} likes · {formatCount(item.stats.comments)} comments
-                </p>
-              </div>
-
-              <div className="feed-rail">
-                <button className={item.liked ? 'feed-act liked' : 'feed-act'} onClick={() => void like()} title={item.liked ? 'Unlike' : 'Like'} aria-pressed={item.liked}>
-                  <Icon name="heart" size={28} />
-                  <span>{formatCount(item.stats.likes)}</span>
-                </button>
-                <button className="feed-act" onClick={() => void openComments()} title="Comments">
-                  <Icon name="comment" size={26} />
-                  <span>{formatCount(item.stats.comments)}</span>
-                </button>
-                <button className="feed-act" onClick={() => setShareOpen(true)} title="Send to a chat">
-                  <Icon name="send" size={24} />
-                  <span>Send</span>
-                </button>
-                <button className="feed-act" onClick={() => setMuted((m) => !m)} title={muted ? 'Unmute' : 'Mute'}>
-                  <Icon name={muted ? 'mute' : 'volume'} size={24} />
-                  <span>{muted ? 'Sound off' : 'Sound on'}</span>
-                </button>
-                <a className="feed-act" href={item.url} target="_blank" rel="noopener noreferrer" title="Open on TikTok">
-                  <Icon name="link" size={22} />
-                  <span>TikTok</span>
-                </a>
-              </div>
-            </div>
-
-            <div className="feed-nav">
-              <button className="feed-arrow" onClick={() => void step('prev')} disabled={busy} title="Previous (↑)">
-                <Icon name="back" size={22} />
-              </button>
-              <button className="feed-arrow" onClick={() => void step('next')} disabled={busy} title="Next (↓)">
-                <Icon name="back" size={22} className="flip" />
-              </button>
-            </div>
-            {busy ? <div className="feed-busy"><Spinner size={22} /></div> : null}
-          </>
-        ) : (
-          <div className="feed-loading">
-            <Icon name="video" size={36} />
-            <p>No video could be read from the feed.</p>
-            <button className="btn" onClick={() => void load()}>
-              Try again
-            </button>
-          </div>
-        )}
+      <div className="feed-nav">
+        <button className="feed-arrow" onClick={() => step('prev')} title="Previous (↑)">
+          <Icon name="back" size={22} />
+        </button>
+        <button className="feed-arrow" onClick={() => step('next')} title="Next (↓)">
+          <Icon name="back" size={22} className="flip" />
+        </button>
       </div>
+      {busy ? (
+        <div className="feed-busy">
+          <Spinner size={22} />
+        </div>
+      ) : null}
 
-      {commentsOpen ? (
+      {commentsFor ? (
         <CommentsPanel
           comments={comments}
           loading={commentsLoading}
           error={commentsError}
-          onRetry={() => void loadComments()}
+          onRetry={() => void loadComments(commentsFor)}
           text={commentText}
           setText={setCommentText}
           onPost={() => void postComment()}
@@ -268,7 +242,16 @@ export function FeedPage() {
           busy={sending}
         />
       ) : null}
-      {shareOpen && item ? <ShareDialog item={item} onClose={() => setShareOpen(false)} onSent={(name) => { setShareOpen(false); setNotice(`Sent to ${name}.`); }} /> : null}
+      {shareFor ? (
+        <ShareDialog
+          item={shareFor}
+          onClose={() => setShareFor(null)}
+          onSent={(name) => {
+            setShareFor(null);
+            setNotice(`Sent to ${name}.`);
+          }}
+        />
+      ) : null}
 
       <div className="feed-errors">
         <ErrorNote error={error} />
@@ -278,7 +261,147 @@ export function FeedPage() {
           </p>
         ) : null}
       </div>
-      <p className="feed-hint muted small">↑ / ↓ or J / K to move · click the video to mute · likes and comments go through TikTok's own controls</p>
+      <p className="feed-hint muted small">↑ / ↓ or J / K to move · swipe on a phone · click the video to mute</p>
+    </div>
+  );
+}
+
+function Slide({
+  item,
+  active,
+  near,
+  muted,
+  onVisible,
+  onLike,
+  onComments,
+  onShare,
+  onToggleMute,
+}: {
+  item: FeedItem;
+  active: boolean;
+  near: boolean;
+  muted: boolean;
+  onVisible: (id: string) => void;
+  onLike: () => void;
+  onComments: () => void;
+  onShare: () => void;
+  onToggleMute: () => void;
+}) {
+  const box = useRef<HTMLDivElement | null>(null);
+  const video = useRef<HTMLVideoElement | null>(null);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        if (e && e.isIntersecting && e.intersectionRatio >= 0.6) onVisible(item.id);
+      },
+      { threshold: [0.6] },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [item.id, onVisible]);
+
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    if (active) {
+      v.currentTime = 0;
+      void v.play().catch(() => undefined);
+    } else {
+      v.pause();
+    }
+  }, [active, reloadKey, near]);
+
+  useEffect(() => {
+    setReady(false);
+    setFailed(false);
+  }, [item.id, reloadKey]);
+
+  const src = near ? item.video?.src ?? undefined : undefined;
+
+  return (
+    <div className="feed-slide" ref={box}>
+      {item.video?.poster ? <img className="feed-poster" src={item.video.poster} alt="" aria-hidden="true" /> : null}
+      <video
+        key={`${item.id}:${reloadKey}`}
+        ref={video}
+        className={ready ? 'feed-video ready' : 'feed-video'}
+        src={src}
+        poster={item.video?.poster ?? undefined}
+        autoPlay={active}
+        loop
+        playsInline
+        preload={near ? 'auto' : 'none'}
+        muted={muted}
+        onCanPlay={() => setReady(true)}
+        onPlaying={() => setReady(true)}
+        onError={() => setFailed(true)}
+        onClick={onToggleMute}
+      />
+      {item.video?.src && !ready && !failed ? (
+        <div className="feed-video-loading">
+          <Spinner size={26} />
+        </div>
+      ) : null}
+      {!item.video?.src || failed ? (
+        <div className="feed-no-video">
+          <Icon name="video" size={36} />
+          <p>{failed ? 'The video could not be played.' : 'This video is not ready yet — swipe on and come back.'}</p>
+          <div className="feed-no-video-actions">
+            <button className="btn" onClick={() => setReloadKey((k) => k + 1)}>
+              Play again
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="feed-overlay">
+        <div className="feed-meta">
+          {item.author.username ? (
+            <a className="feed-author" href={item.url} target="_blank" rel="noopener noreferrer">
+              @{item.author.username}
+            </a>
+          ) : null}
+          {item.caption ? <p className="feed-caption">{item.caption}</p> : null}
+          {item.music ? (
+            <p className="feed-music">
+              <Icon name="music" size={14} /> {item.music}
+            </p>
+          ) : null}
+          <p className="feed-stats">
+            {formatCount(item.stats.plays)} plays · {formatCount(item.stats.likes)} likes · {formatCount(item.stats.comments)} comments
+          </p>
+        </div>
+
+        <div className="feed-rail">
+          <button className={item.liked ? 'feed-act liked' : 'feed-act'} onClick={onLike} title={item.liked ? 'Unlike' : 'Like'} aria-pressed={item.liked}>
+            <Icon name="heart" size={28} />
+            <span>{formatCount(item.stats.likes)}</span>
+          </button>
+          <button className="feed-act" onClick={onComments} title="Comments">
+            <Icon name="comment" size={26} />
+            <span>{formatCount(item.stats.comments)}</span>
+          </button>
+          <button className="feed-act" onClick={onShare} title="Send to a chat">
+            <Icon name="send" size={24} />
+            <span>Send</span>
+          </button>
+          <button className="feed-act" onClick={onToggleMute} title={muted ? 'Unmute' : 'Mute'}>
+            <Icon name={muted ? 'mute' : 'volume'} size={24} />
+            <span>{muted ? 'Sound off' : 'Sound on'}</span>
+          </button>
+          <a className="feed-act" href={item.url} target="_blank" rel="noopener noreferrer" title="Open on TikTok">
+            <Icon name="link" size={22} />
+            <span>TikTok</span>
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

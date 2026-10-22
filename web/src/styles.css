@@ -3094,3 +3094,35 @@ button.reel-action:disabled {
     display: none;
   }
 }
+
+/* The feed is a native snapping scroller (one full-height slide per video): that is what gives the swipe velocity,
+   the snap and the momentum on a phone, and smooth arrow-key movement on a desktop. */
+.feed-window {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.feed-window::-webkit-scrollbar {
+  display: none;
+}
+.feed-slide {
+  position: relative;
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed-window {
+    scroll-behavior: auto;
+  }
+}

@@ -257,12 +257,32 @@ const AGENT = String.raw`
       const av = el.querySelector('[data-e2e="video-author-avatar"]');
       const a = av && av.closest('a[href^="/@"]');
       const d = detailsFor(id);
+      const avatarImg = el.querySelector('[data-e2e="video-author-avatar"] img, [data-e2e="browse-avatar"] img');
+      const captionEl = first(S.caption, el)[0] || null;
+      const musicEl = first(S.music, el)[0] || null;
       out.push({
         index: idx,
         id,
         author: a ? (a.getAttribute('href') || '').replace(/^\/@/, '') : null,
+        authorName: a ? txt(a).replace(/^@/, '') || null : null,
+        avatar: avatarImg && /^https:/.test(avatarImg.getAttribute('src') || '') ? avatarImg.getAttribute('src') : null,
+        caption: captionEl ? txt(captionEl) : null,
+        music: musicEl ? txt(musicEl) : null,
+        liked: likedNow(el),
+        stats: {
+          likes: parseStat(first(S.likeCount, el)[0]),
+          comments: parseStat(first(S.commentCount, el)[0]),
+          shares: parseStat(first(S.shareCount, el)[0]),
+          plays: parseStat(first(S.playCount, el)[0]),
+        },
         playAddr: d ? d.playAddr : null,
         cover: d ? d.cover : null,
+        desc: d ? d.desc : null,
+        dLikes: d ? d.likes : null,
+        dComments: d ? d.comments : null,
+        dShares: d ? d.shares : null,
+        dPlays: d ? d.plays : null,
+        dMusic: d ? d.music : null,
       });
     }
     return out;
@@ -495,8 +515,21 @@ export interface RawQueueItem {
   index: number;
   id: string | null;
   author: string | null;
+  authorName: string | null;
+  avatar: string | null;
+  caption: string | null;
+  music: string | null;
+  liked: boolean;
+  stats: { likes: number | null; comments: number | null; shares: number | null; plays: number | null };
   playAddr: string | null;
   cover: string | null;
+  /** The page's bundled item struct: exact caption and counts, when this item is in it. */
+  desc: string | null;
+  dLikes: number | null;
+  dComments: number | null;
+  dShares: number | null;
+  dPlays: number | null;
+  dMusic: string | null;
 }
 
 export interface RawFeedItem {

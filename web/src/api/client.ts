@@ -148,6 +148,10 @@ export const api = {
 
   feed: () => request<{ item: FeedItem | null }>('GET', '/api/feed'),
   feedStep: (dir: 'next' | 'prev') => request<{ item: FeedItem }>('POST', '/api/feed/step', { dir }),
+  /** The video in view plus the next few, for the swiping feed. */
+  feedWindow: (limit = 3) => request<{ items: FeedItem[]; current: string | null }>('GET', `/api/feed/window?limit=${limit}`),
+  /** The user swiped to a video: move the remote page there and get a fresh window. */
+  feedGoto: (id: string) => request<{ items: FeedItem[]; current: string | null }>('POST', '/api/feed/goto', { id }),
   feedLike: (id: string, like: boolean) => request<{ liked: boolean }>('POST', `/api/feed/${enc(id)}/like`, { like }),
   feedComments: (id: string) => request<FeedCommentPage>('GET', `/api/feed/${enc(id)}/comments`),
   feedComment: (id: string, text: string) => request<FeedCommentPage>('POST', `/api/feed/${enc(id)}/comment`, { text }),

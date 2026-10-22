@@ -424,14 +424,13 @@ const AGENT = String.raw`
       const id = idFrom(row);
       const name = (txt(row).split(/\n+/)[0] || '').trim();
       if ((id && id === key) || norm(name) === norm(key)) {
+        // Tag the row and let the Node side click it: TikTok's list reacts to trusted pointer events, and a
+        // synthetic click on the row wrapper is ignored often enough that sending failed with "could not be opened".
         const target = row.closest('a') || row;
         for (const el of all('[data-ttl-open="1"]')) el.removeAttribute('data-ttl-open');
         target.setAttribute('data-ttl-open', '1');
         target.scrollIntoView({ block: 'center' });
-        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-        target.click();
-        return { ok: true, id, name };
+        return { ok: true, id, name, tagged: true };
       }
     }
     return { ok: false };
@@ -462,6 +461,35 @@ const AGENT = String.raw`
       el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
     }
     return true;
+  };
+
+  /** Tags the composer so the Node side can focus it and type with real key events (Draft.js ignores execCommand). */
+  const composerTag = () => {
+    const el = composer();
+    if (!el) return { ok: false, error: 'no_composer' };
+    for (const old of all('[data-ttl-compose="1"]')) old.removeAttribute('data-ttl-compose');
+    el.setAttribute('data-ttl-compose', '1');
+    return { ok: true };
+  };
+
+  const composerText = () => {
+    const el = document.querySelector('[data-ttl-compose="1"]') || composer();
+    if (!el) return { value: '' };
+    return { value: el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' ? el.value : txt(el) };
+  };
+
+  /** Tags the send control when one exists, so the Node side can click it for real; else the caller presses Enter. */
+  const sendTag = () => {
+    for (const sel of S.sendButton) {
+      const btns = all(sel).filter(vis);
+      if (btns.length) {
+        const b = btns[btns.length - 1];
+        for (const old of all('[data-ttl-send="1"]')) old.removeAttribute('data-ttl-send');
+        b.setAttribute('data-ttl-send', '1');
+        return { ok: true, via: 'button' };
+      }
+    }
+    return { ok: true, via: 'enter' };
   };
 
   const setText = (text) => {
@@ -571,6 +599,9 @@ const AGENT = String.raw`
     messages: () => messages(),
     openThread: (key) => openThread(key),
     setText: (t) => setText(t),
+    composerTag: () => composerTag(),
+    composerText: () => composerText(),
+    sendTag: () => sendTag(),
     send: () => send(),
     attach: (b64, name, mime) => attach(b64, name, mime),
     scroll: (d) => scrollMessages(d),
@@ -711,18 +742,66 @@ export class DomAgent {
     };
   }
 
-  async openThread(key: string): Promise<{ ok: boolean }> {
-    return this.call('openThread', key);
+  /**
+   * Opens a conversation by its id or its name.
+   *
+   * The row is found in the page, then clicked here rather than inside the page: TikTok's list wants a trusted pointer
+   * event, and a synthetic `.click()` from the page context was ignored often enough that sending to a chat failed
+   * with "that conversation could not be opened".
+   */
+  async openThread(key: string): Promise<{ ok: boolean; id?: string | null; name?: string; error?: string }> {
+    const found = await this.call<{ ok: boolean; id?: string | null; name?: string; tagged?: boolean }>('openThread', key);
+    if (!found.ok || !found.tagged) return found;
+    const clicked = await this.page.click('[data-ttl-open="1"]').then(
+      () => true,
+      () => false,
+    );
+    if (!clicked) return { ...found, ok: false, error: 'click_failed' };
+    return found;
   }
 
-  /** Types [text] into the composer (no send yet). */
+  /**
+   * Types [text] into the composer with real key events.
+   *
+   * TikTok's composer is Draft.js: it ignores `document.execCommand('insertText')` often enough that the box looked
+   * filled in the page but the send stayed disabled. The element is tagged in the page, then focused and typed into here.
+   */
   async setText(text: string): Promise<{ ok: boolean; error?: string; value?: string }> {
-    return this.call('setText', text);
+    const tagged = await this.call<{ ok: boolean; error?: string }>('composerTag');
+    if (!tagged.ok) return { ok: false, error: tagged.error ?? 'no_composer' };
+    const sel = '[data-ttl-compose="1"]';
+    try {
+      await this.page.focus(sel);
+      // Clear whatever a previous attempt left behind.
+      await this.page.keyboard.down('Control');
+      await this.page.keyboard.press('KeyA');
+      await this.page.keyboard.up('Control');
+      await this.page.keyboard.press('Backspace');
+      await this.page.keyboard.type(text, { delay: 8 });
+    } catch {
+      return { ok: false, error: 'typing_failed' };
+    }
+    const read = await this.call<{ value: string }>('composerText').catch(() => ({ value: '' }));
+    return { ok: read.value.trim() === text.trim(), value: read.value };
   }
 
-  /** Clicks the send button, else presses Enter. */
+  /** Clicks the send button, else presses Enter — both as real events. */
   async send(): Promise<{ ok: boolean; via?: string; error?: string }> {
-    return this.call('send');
+    const target = await this.call<{ ok: boolean; via?: string }>('sendTag').catch(() => ({ ok: true, via: 'enter' }));
+    if (target.via === 'button') {
+      const clicked = await this.page.click('[data-ttl-send="1"]').then(
+        () => true,
+        () => false,
+      );
+      if (clicked) return { ok: true, via: 'button' };
+    }
+    try {
+      await this.page.focus('[data-ttl-compose="1"]').catch(() => undefined);
+      await this.page.keyboard.press('Enter');
+      return { ok: true, via: 'enter' };
+    } catch {
+      return { ok: false, error: 'enter_failed' };
+    }
   }
 
   /** Attaches a file through the page's own file input (base64, so nothing has to be shared on disk). */

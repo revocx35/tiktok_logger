@@ -153,7 +153,8 @@ try {
   fake.conversations.find((c) => c.conversation_id === CHAT)!.messages = fake.conversations
     .find((c) => c.conversation_id === CHAT)!
     .messages.filter((m) => m.message_id !== victim.message_id);
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  // A reload of a page whose agent is mid-evaluation can reject with a detached frame: that is not a product failure.
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => undefined);
   await sleep(500);
   await (service as unknown as { reconcileOnce: () => Promise<void> }).reconcileOnce();
   const gone = repo.listDeleted(null, 50);
@@ -172,6 +173,17 @@ try {
   check('un-liking goes through TikTok\'s own control', unliked.liked === false, JSON.stringify(unliked));
   const back = await service.feed.step('prev');
   check('the feed goes back', back.id === fake.feed[0]!.id, JSON.stringify(back.id));
+  // The swiping clients (web and Android) read a window and then ask the page to follow the slide they settled on.
+  const win = await service.feed.window(3);
+  check(
+    'the window holds the video in view and the ones after it',
+    win.items.length >= 2 && win.current === win.items[0]!.id && win.items.every((i) => !!i.id),
+    JSON.stringify(win.items.map((i) => i.id)),
+  );
+  const jumped = await service.feed.goto(fake.feed[1]!.id);
+  check('swiping to a video moves the page there', jumped.current === fake.feed[1]!.id, JSON.stringify(jumped.current));
+  const backAgain = await service.feed.goto(fake.feed[0]!.id);
+  check('swiping back moves it back', backAgain.current === fake.feed[0]!.id, JSON.stringify(backAgain.current));
   const feedComments = await service.feed.comments(back.id);
   check('comments are read (with a reply)', feedComments.length === 2 && feedComments[1]!.replies.length === 1, JSON.stringify(feedComments.map((c) => [c.text, c.replies.length])));
   const postedComments = await service.feed.comment(back.id, 'comment from the service check');
@@ -192,7 +204,8 @@ try {
   await page.evaluate(async () => {
     // The fake page polls nothing; a reload is what a returning tab does, and the reconcile picks the message up.
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  // A reload of a page whose agent is mid-evaluation can reject with a detached frame: that is not a product failure.
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => undefined);
   await sleep(400);
   await (service as unknown as { reconcileOnce: () => Promise<void> }).reconcileOnce();
   check('the messages tab still logs after using the feed', repo.messageIdsBetween(CHAT, 0, Date.now()).length >= msgsBefore);

@@ -20,6 +20,18 @@ export function registerFeedRoutes(app: FastifyInstance, ctx: AppContext): void 
     return { item: await ctx.tt.feed.current() };
   });
 
+  /** The video in view plus the next few: the web and Android clients swipe through these. */
+  app.get('/api/feed/window', { config: BROWSING }, async (req) => {
+    const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(6).default(3) }).parse(req.query);
+    return ctx.tt.feed.window(limit);
+  });
+
+  /** The client swiped to a video: move the remote page there and hand back a fresh window. */
+  app.post('/api/feed/goto', { config: BROWSING }, async (req) => {
+    const { id } = z.object({ id: z.string().min(1).max(80).regex(/^[A-Za-z0-9_:.-]+$/) }).strict().parse(req.body);
+    return ctx.tt.feed.goto(id);
+  });
+
   app.post('/api/feed/step', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
     const { dir } = z.object({ dir: z.enum(['next', 'prev']) }).strict().parse(req.body);
     return { item: await ctx.tt.feed.step(dir) };
