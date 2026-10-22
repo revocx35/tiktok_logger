@@ -599,7 +599,8 @@ export class ImEngine {
    * shared post and the other side sees like any shared video.
    */
   async sendShare(chatId: string, share: ShareArgs): Promise<string> {
-    return this.serial(async () => {
+    const link = `https://www.tiktok.com/@_/video/${share.itemId}`;
+    const sent = await this.serial(async () => {
       const info = await this.infoFor(chatId);
       if (!info) throw new ImSendError('This conversation is not known to TikTok yet. Open it on the TikTok screen once.', false);
       const { env } = await this.t.env();
@@ -616,22 +617,53 @@ export class ImEngine {
         publicKeyB64: keys.publicKeyB64,
         share,
       });
-      const sent = await this.postSend(url, body, env, keys);
-      const id = sent.messageId && /^\d{5,24}$/.test(sent.messageId) ? sent.messageId : `srv:${createHash('sha256').update(clientId).digest('base64url').slice(0, 22)}`;
+      const reply = await this.postSend(url, body, env, keys);
+      const id = reply.messageId && /^\d{5,24}$/.test(reply.messageId) ? reply.messageId : `srv:${createHash('sha256').update(clientId).digest('base64url').slice(0, 22)}`;
+      return { id, info };
+    });
+    // A card can be answered with status 0 and then never stored (TikTok validates its shape silently). Verify it, and
+    // fall back to the plain link when it did not land — a share that silently disappears is worse than a link.
+    const landed = await this.confirmShare(chatId, sent.info.sourceId, share.itemId, sent.id, 3500);
+    if (landed) {
+      const me = await this.me();
       const msg: TtMessage = {
-        id,
+        id: sent.id,
         threadId: chatId,
         senderId: me,
         fromMe: true,
         ts: Date.now(),
         type: 'shared_post',
         text: share.title ?? null,
-        meta: { itemId: share.itemId, uid: share.uid, ...(share.cover ? { cover: share.cover } : {}) },
+        meta: { itemId: share.itemId, uid: share.uid },
         source: 'sent',
       };
       this.knownThread(chatId, me);
-      return this.ingest.message(msg, 'sent') ?? id;
-    });
+      return this.ingest.message(msg, 'sent') ?? sent.id;
+    }
+    this.ctx.log.warn({ chat: maskId(chatId) }, 'video card was not stored by TikTok, sending the link instead');
+    return this.sendText(chatId, link);
+  }
+
+  /** Looks for a just-sent card in the conversation (TikTok drops a message it did not like without saying so). */
+  private async confirmShare(chatId: string, sourceId: string, itemId: string, messageId: string, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      try {
+        const { env } = await this.t.env();
+        const h = await this.t.post(HISTORY_PATH, buildHistoryRequest(env, chatId, sourceId, '0', 6), {});
+        if (h.status === 200) {
+          const rows = parseHistory(h.body).messages;
+          for (const m of rows) {
+            if (m.serverId === messageId) return true;
+            if (/"aweType":800/.test(m.content.toString('utf8')) && m.content.toString('utf8').includes(itemId)) return true;
+          }
+        }
+      } catch {
+        /* try again until the deadline */
+      }
+      await sleep(900);
+    } while (Date.now() < deadline);
+    return false;
   }
 
   /**

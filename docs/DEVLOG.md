@@ -27,6 +27,12 @@ TikTok's own cards carry `cover_url` **and** `content_thumb` as objects (`{uri, 
 stored. All of them are sent now (`ShareArgs`). The builder now sends the object form (and the same was true for the
 reaction: `action_flag` must be **2 in a group**, 1 in a direct chat — with 1 a group answered status 500).
 
+Even with the complete body the card was still not stored (checked through the all-conversations combo feed: no shared
+post in the last 30 minutes), so the send now **verifies what it sent**: the conversation's newest rows are read for the
+message id or for an `aweType: 800` body carrying the item, and when TikTok did not keep it the canonical link is sent
+as text instead, with a warning in the log. A share that silently disappears is worse than a link; if TikTok starts
+accepting the card again it is used as-is.
+
 Remaining parity gaps, deliberately: media *uploads* still go through the page's file input (the protocol needs the
 private-image/VOD upload dance), unsend/edit are still reported `not_supported`, and typing indicators are not sent.
 
