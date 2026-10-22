@@ -1,5 +1,20 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.1.3: the TikTok screen's "connection lost" (a rename that only reached one side)
+
+The VNC bridge tunnels to x11vnc with an HTTP `Upgrade` whose name the Go manager compares **exactly**
+(`chromium/manager/server.go`: `Upgrade: ttl-tunnel`). When the manager was renamed from `igl-` to `ttl-`, the Go
+side, its tests and the docs were updated — the TypeScript client kept sending `igl-tunnel`. The manager answered
+400, `openVncTunnel` rejected, the bridge closed the socket with 1011, and the screen retried every three seconds
+forever, while the app itself was healthy (the browser was sitting on the TikTok login page).
+
+`server/src/tt/chromium.test.ts` now pins the contract against a local HTTP upgrade server: header name, path
+`/i/<n>/vnc`, bearer token, the `RFB 003.008` banner arriving, and a refusal rejecting instead of hanging. Verified on
+the deployment afterwards with the same tunnel from inside the app container (101, then `RFB 003.008` in 200 ms).
+
+Lesson: a protocol constant shared by two languages belongs in a test on **both** sides — the Go tests only proved
+that the Go server accepts its own name.
+
 ## 2026-10-22 — v1.1.1: the feed import fix (and a CI guard)
 
 `api/feed.ts` imported `once` from `node:stream` (it is in `node:events`). TypeScript's types include it, Node's ESM
