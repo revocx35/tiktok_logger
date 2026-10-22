@@ -35,6 +35,30 @@ jobs:
         working-directory: server
       - run: npm run build
         working-directory: server
+      # The images run dist/, not tsx: a runtime-only import error (e.g. once from node:stream) would pass the tests
+      # and the build, and then kill every worker at boot. Boot the built server and ask it for /healthz.
+      - name: The built app must boot
+        working-directory: server
+        env:
+          DATA_DIR: ${{ runner.temp }}/boot
+          PORT: '18081'
+          HOST: 127.0.0.1
+          TT_ENABLED: 'false'
+          COOKIE_SECURE: 'false'
+          LOG_LEVEL: error
+          SETUP_TOKEN: boot-check-setup-token-0123456789
+        run: |
+          node dist/index.js > boot.log 2>&1 &
+          pid=$!
+          ok=0
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then ok=1; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+          kill "$pid" 2>/dev/null || true
+          if [ "$ok" != "1" ]; then echo "the built server did not answer /healthz:"; cat boot.log; exit 1; fi
+          echo "built server boots and answers /healthz"
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
         working-directory: server

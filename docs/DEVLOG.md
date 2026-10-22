@@ -1,5 +1,15 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.1.1: the feed import fix (and a CI guard)
+
+`api/feed.ts` imported `once` from `node:stream` (it is in `node:events`). TypeScript's types include it, Node's ESM
+loader does not; the unit tests only import the route module through vitest (which was happy) and the build only
+type-checks, so it reached the deployment: every worker exited at boot and signup answered "your account is starting".
+Fixed in v1.1.1. Root cause worth remembering: **the container runs `dist/`, so tests+build prove nothing about booting**.
+CI now boots the built server in the `server` job and polls `/healthz` (v1.1.2), which is the cheapest check that
+catches this whole class of late import/init errors.
+
+
 ## 2026-10-22 — v1.1.0: the Feed
 
 Added TikTok's For You feed (`/feed`) as its own tab in the same browser: read the video in view (id, author, caption,
