@@ -415,7 +415,7 @@ export class TtService implements TtController, ChatDriver {
     // The protocol only exists on the real site (the test double has no IM API).
     if (this.ctx.config.ttWebOrigin !== 'https://www.tiktok.com') return null;
     const transport = new ImTransport({ evaluate: (fn, ...args) => page.evaluate(fn as never, ...(args as unknown as never[])) as never });
-    const engine = new ImEngine(this.ctx, this.ingest, transport, { activity: () => (this.lastEventAt = Date.now()) });
+    const engine = new ImEngine(this.ctx, this.ingest, transport, { activity: () => (this.lastEventAt = Date.now()), downloader: () => this.downloaderRef });
     if (!(await engine.probe())) {
       this.ctx.log.warn('TikTok IM protocol unavailable in this tab — using the page-driving fallback');
       return null;
@@ -449,6 +449,7 @@ export class TtService implements TtController, ChatDriver {
           this.setState(kind === 'login' ? 'login' : 'challenge', 'TikTok is logged out. Log in on the TikTok screen.');
         } else {
           await engine.catchUp('live', 6);
+          if (engine.peopleAge() > 30 * 60_000) void engine.refreshPeople().catch(() => undefined);
           failures = 0;
           this.lastPollAt = Date.now();
           if (this.state !== 'ready') this.setState('ready');

@@ -2990,8 +2990,15 @@ button.reel-action:disabled {
 .feed-chat-row:hover {
   background: var(--hover);
 }
-.feed-chat-row span {
+.feed-chat-row .feed-chat-name {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.feed-chat-row .avatar {
+  flex: none;
 }
 @media (max-width: 720px) {
   .feed-meta {

@@ -176,6 +176,19 @@ export function FeedPage() {
     }
   };
 
+  /** Sharing runs in the background: the menu closes at once and the result shows up as a note when TikTok has answered. */
+  const shareTo = (item: FeedItem, chat: ChatSummary) => {
+    setShareFor(null);
+    setNotice(`Sending to ${chat.name}…`);
+    api.sendText(chat.id, item.url).then(
+      () => setNotice(`Sent to ${chat.name}.`),
+      (e) => {
+        setNotice(null);
+        setError(`Could not send to ${chat.name}: ${errorMessage(e)}`);
+      },
+    );
+  };
+
   const activeIndex = Math.max(0, items.findIndex((i) => i.id === activeId));
 
   return (
@@ -243,14 +256,7 @@ export function FeedPage() {
         />
       ) : null}
       {shareFor ? (
-        <ShareDialog
-          item={shareFor}
-          onClose={() => setShareFor(null)}
-          onSent={(name) => {
-            setShareFor(null);
-            setNotice(`Sent to ${name}.`);
-          }}
-        />
+        <ShareDialog item={shareFor} onClose={() => setShareFor(null)} onPick={(chat) => shareTo(shareFor, chat)} />
       ) : null}
 
       <div className="feed-errors">
@@ -491,26 +497,13 @@ function CommentRow({ c, depth }: { c: FeedComment; depth: number }) {
   );
 }
 
-function ShareDialog({ item, onClose, onSent }: { item: FeedItem; onClose: () => void; onSent: (name: string) => void }) {
+function ShareDialog({ item, onClose, onPick }: { item: FeedItem; onClose: () => void; onPick: (chat: ChatSummary) => void }) {
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState<string | null>(null);
 
   useEffect(() => {
-    api.chats().then(setChats, (e) => setError(errorMessage(e)));
+    api.chats().then((all) => setChats(all.filter((c) => !c.removed)), (e) => setError(errorMessage(e)));
   }, []);
-
-  const send = async (chat: ChatSummary) => {
-    setSending(chat.id);
-    try {
-      await api.sendText(chat.id, item.url);
-      onSent(chat.name);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setSending(null);
-    }
-  };
 
   return (
     <Modal title="Send this video" onClose={onClose}>
@@ -518,10 +511,10 @@ function ShareDialog({ item, onClose, onSent }: { item: FeedItem; onClose: () =>
       <div className="feed-chat-picker">
         {chats === null && !error ? <Spinner size={20} /> : null}
         {(chats ?? []).map((c) => (
-          <button key={c.id} className="feed-chat-row" onClick={() => void send(c)} disabled={sending !== null}>
+          <button key={c.id} className="feed-chat-row" onClick={() => onPick(c)}>
             <Avatar id={c.id} name={c.name} url={c.avatarUrl ?? null} kind={c.kind} size={36} />
-            <span>{c.name}</span>
-            {sending === c.id ? <Spinner size={16} /> : <Icon name="send" size={16} />}
+            <span className="feed-chat-name">{c.name}</span>
+            <Icon name="send" size={16} />
           </button>
         ))}
       </div>

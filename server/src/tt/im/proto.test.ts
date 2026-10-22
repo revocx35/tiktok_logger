@@ -197,11 +197,13 @@ describe('answers', () => {
   });
 
   it('reads the id of a sent message from either place TikTok puts it', () => {
-    const a = new PbWriter().u64(1, 0).message(6, new PbWriter().message(100, new PbWriter().u64(1, 7700000000000000009n))).build();
+    const a = new PbWriter().u64(1, 100).u64(3, 0).message(6, new PbWriter().message(100, new PbWriter().u64(1, 7700000000000000009n))).build();
     expect(parseSend(a)).toEqual({ status: '0', messageId: '7700000000000000009' });
-    const b = new PbWriter().u64(1, 0).message(8, new PbWriter().message(100, new PbWriter().string(1, '7700000000000000010'))).build();
+    const b = new PbWriter().u64(1, 100).message(8, new PbWriter().message(100, new PbWriter().string(1, '7700000000000000010'))).build();
     expect(parseSend(b).messageId).toBe('7700000000000000010');
-    expect(parseSend(new PbWriter().u64(1, 12345).build())).toEqual({ status: '12345', messageId: '' });
+    expect(parseSend(new PbWriter().u64(1, 100).u64(3, 12345).build())).toEqual({ status: '12345', messageId: '' });
+    // the request type echoed in field 1 is not a status
+    expect(parseSend(new PbWriter().u64(1, 100).build()).status).toBe('');
   });
 });
 

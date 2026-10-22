@@ -73,7 +73,7 @@ class FakeTransport {
   }
   async getJson(url: string) {
     const ids = JSON.parse(new URL(url).searchParams.get('user_ids')!) as string[];
-    return { users: ids.filter((i) => this.profiles[i]).map((i) => ({ im_user_profile: { user_id_str: i, unique_id: this.profiles[i]!.unique, nick_name: this.profiles[i]!.nick } })) };
+    return { users: ids.filter((i) => this.profiles[i]).map((i) => ({ im_user_profile: { user_id_str: i, unique_id: this.profiles[i]!.unique, nick_name: this.profiles[i]!.nick, avatars: { avatar_medium: { url_list: [`https://p16.tiktokcdn.com/a${i}.jpeg`] } } } })) };
   }
 }
 
@@ -84,6 +84,7 @@ describe('ImEngine', () => {
   let t: FakeTransport;
   let engine: ImEngine;
   let queued: string[];
+  const dl = { fetch: async (_url: string, _max: number, sink: (c: Buffer) => Promise<void>) => { await sink(Buffer.from([0xff, 0xd8, 0xff, 0xd9])); return { status: 'ok' as const, mime: 'image/jpeg', size: 4 }; } };
 
   beforeEach(async () => {
     const made = await makeCtx();
@@ -93,7 +94,7 @@ describe('ImEngine', () => {
     ingest = new Ingest(ctx, made.events, new MediaSources(), { enqueue: (id) => queued.push(id) });
     ingest.me = { id: ME, username: 'owner', name: 'Owner' };
     t = new FakeTransport();
-    engine = new ImEngine(ctx, ingest, t as unknown as ImTransport, { activity: () => undefined });
+    engine = new ImEngine(ctx, ingest, t as unknown as ImTransport, { activity: () => undefined, downloader: () => dl });
   });
   afterEach(async () => {
     await cleanup();
@@ -236,8 +237,25 @@ describe('ImEngine', () => {
     expect(ctx.repo.getChat(CONV)!.removed_at).toBeNull();
   });
 
+  it('names group senders and downloads profile pictures for chats', async () => {
+    standard();
+    await engine.initialImport(() => undefined);
+    await engine.refreshPeople();
+    const contact = ctx.repo.getContact(PEER)!;
+    expect(contact.name_enc).not.toBeNull();
+    expect(contact.avatar_media_id).not.toBeNull();
+    expect(ctx.repo.getChat(CONV)!.avatar_media_id).not.toBeNull();
+    expect(ctx.repo.getChat('987654321')!.avatar_media_id).toBeNull(); // no group picture known
+    // a stranger speaking in a group is named without waiting for the periodic pass
+    t.profiles['7000000000000000099'] = { nick: 'Zeynep', unique: 'zeynep' };
+    const frame = new PbWriter().u64(1, 1).bytes(8, new PbWriter().u64(1, 500).message(6, new PbWriter().message(500, new PbWriter().string(2, '987654321').message(5, row({ conv: '987654321', id: '7700000000000000050', tsUs: NOW_US, sender: '7000000000000000099', text: 'selam' })))).build()).build();
+    engine.handleFrame(frame);
+    await new Promise((res) => setTimeout(res, 2600));
+    expect(ctx.repo.getContact('7000000000000000099')!.name_enc).not.toBeNull();
+  });
+
   describe('sending', () => {
-    const sendOk = (id: string) => new PbWriter().u64(1, 0).message(6, new PbWriter().message(100, new PbWriter().u64(1, BigInt(id)))).build();
+    const sendOk = (id: string) => new PbWriter().u64(1, 100).u64(3, 0).message(6, new PbWriter().message(100, new PbWriter().u64(1, BigInt(id)))).build();
 
     it('sends with a DPoP proof and ticket-guard headers, and stores the message under TikTok’s id', async () => {
       standard();
@@ -261,7 +279,7 @@ describe('ImEngine', () => {
       await engine.initialImport(() => undefined);
       t.handlers[SEND_PATH] = () => ({ status: 403, body: Buffer.alloc(0) });
       await expect(engine.sendText(CONV, 'x')).rejects.toMatchObject({ maybeSent: false });
-      t.handlers[SEND_PATH] = () => new PbWriter().u64(1, 12345).build();
+      t.handlers[SEND_PATH] = () => new PbWriter().u64(1, 100).u64(3, 12345).build();
       await expect(engine.sendText(CONV, 'x')).rejects.toBeInstanceOf(ImSendError);
       t.handlers[SEND_PATH] = () => new Error('Failed to fetch');
       await expect(engine.sendText(CONV, 'x')).rejects.toMatchObject({ maybeSent: true });

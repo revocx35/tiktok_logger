@@ -429,23 +429,28 @@ export function parseCombo(body: Buffer): ImComboLane[] {
   });
 }
 
-/** The status field and, for send, the server's message id. */
+/**
+ * The answer to a send. Field 1 echoes the request type (100) — it is NOT a status; the status is field 3 (0 = accepted),
+ * the way the inbox answer has type 203 in field 1 and status 0 in field 3. (v1.7.0 read field 1 and reported every
+ * accepted message as "refused, code 100".)
+ */
 export function parseSend(body: Buffer): { status: string; messageId: string } {
   const top = readFields(body);
+  const status = num(top, 3);
   for (const n of [6, 8]) {
     const p = sub(top, n);
     const s = p ? sub(p, 100) : null;
     if (s) {
       const id = str(s, 1) || num(s, 1);
-      if (id) return { status: num(top, 1), messageId: id };
+      if (id) return { status, messageId: id };
     }
   }
-  return { status: num(top, 1), messageId: '' };
+  return { status, messageId: '' };
 }
 
 export function parseStatus(body: Buffer): string {
   try {
-    return num(readFields(body), 1);
+    return num(readFields(body), 3);
   } catch {
     return '';
   }

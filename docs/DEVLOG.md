@@ -1,5 +1,16 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.7.1: "refused code 100", names and pictures, background share
+
+* **Send reported "TikTok refused (code 100)" although the message was sent.** The send answer's field 1 echoes the request
+  *type* (100); the status is field 3. `parseSend` read field 1. The message did go out; the catch-up stored it a few seconds later.
+* **No profile pictures and no names for group members**: the app never fetched them (v1.0–1.6 relied on page reading). `ImEngine.refreshPeople`
+  now loads the profile (`/tiktok/v1/im/user/profile/`: nickname, @name, picture) of every peer and every stored sender, names
+  chats from their peer, and `syncAvatars` downloads pictures (a few per pass; failures retried after a day). A stranger who
+  speaks in a group is named within ~2 s (a queue, not a single slot — an earlier version dropped ids arriving while a lookup waited).
+* **Stretched pictures in the share list**: `.feed-chat-row span {flex:1}` also hit the avatar `<span>`.
+* **Share is background**: the menu closes at once, a note says "Sending to X…", then "Sent to X." or the error.
+
 ## 2026-10-22 — v1.7.0: the feed, comments and likes through TikTok's web API (no feed page)
 
 Same idea as the IM protocol, for `www.tiktok.com/api/...`: TikTok's page hooks `fetch` and signs any request that carries the

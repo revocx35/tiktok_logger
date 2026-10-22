@@ -2,6 +2,7 @@ import { createHash, createPrivateKey, createSign, generateKeyPairSync, randomBy
 import type { AppContext } from '../../context.js';
 import { AppError } from '../../errors.js';
 import { maskId } from '../../log.js';
+import { deleteMediaFile, downloadToMedia, type Downloader } from '../media.js';
 import type { Ingest } from '../ingest.js';
 import type { TtMedia, TtMessage, TtReaction, TtThread } from '../types.js';
 import {
@@ -65,12 +66,16 @@ interface ConvInfo {
 export interface EngineHooks {
   /** Something was stored (drives the "last event" clock). */
   activity(): void;
+  /** The tab's downloader (profile pictures); null while not connected. */
+  downloader?(): Downloader | null;
 }
 
 export class ImEngine {
   private readonly convs = new Map<string, ConvInfo>();
   private cursors: [string, string] = ['0', '0'];
-  private readonly profiles = new Map<string, { name: string | null; username: string | null }>();
+  private readonly profiles = new Map<string, { name: string | null; username: string | null; avatar: string | null }>();
+  private readonly groupAvatars = new Map<string, string>();
+  private peopleAt = 0;
   private saveTimer: NodeJS.Timeout | null = null;
   private busy: Promise<unknown> = Promise.resolve();
   private lastCatchUpAt = 0;
@@ -164,6 +169,7 @@ export class ImEngine {
       for (const c of parseInbox(r.body).conversations) {
         if (!out.some((x) => x.id === c.id)) out.push(c);
         if (c.sourceId) this.convs.set(c.id, { sourceId: c.sourceId, type: c.type });
+        if (c.avatarUrl && c.type === 2) this.groupAvatars.set(c.id, c.avatarUrl);
       }
     }
     this.saveState();
@@ -199,6 +205,7 @@ export class ImEngine {
     this.pruneEmptyChats(new Set(convs.map((c) => c.id)));
     this.ctx.repo.setState('im_imported', '1');
     this.flush();
+    void this.refreshPeople().catch((e: Error) => this.ctx.log.debug({ err: e.message }, 'people pass failed'));
   }
 
   /**
@@ -330,8 +337,107 @@ export class ImEngine {
     if (n) {
       this.lastEventAt = Date.now();
       this.hooks.activity();
+      this.wantPeople(msgs);
     }
     return n;
+  }
+
+  /** Names for senders we have no contact for (group members above all), without waiting for the periodic pass. */
+  private wantPeople(msgs: ImMessage[]): void {
+    for (const m of msgs) if (m.senderId && !this.profiles.has(m.senderId) && !this.ctx.repo.getContact(m.senderId)?.name_enc) this.peopleQueue.add(m.senderId);
+    if (!this.peopleQueue.size || this.pendingPeople) return;
+    this.pendingPeople = true;
+    setTimeout(() => {
+      this.pendingPeople = false;
+      const ids = [...this.peopleQueue].slice(0, 40);
+      for (const id of ids) this.peopleQueue.delete(id);
+      void this.serial(async () => {
+        await this.loadProfiles(ids);
+        for (const id of ids) this.applyProfile(id);
+      }).catch(() => undefined);
+      if (this.peopleQueue.size) this.wantPeople([]);
+    }, 1500).unref();
+  }
+
+  private readonly peopleQueue = new Set<string>();
+  private pendingPeople = false;
+
+  private applyProfile(id: string): void {
+    const p = this.profiles.get(id);
+    if (p && (p.name || p.username)) this.ingest.upsertContact({ id, username: p.username, name: p.name });
+  }
+
+  /**
+   * Names and pictures: every peer and every sender we have stored gets its profile (nickname, @name, picture), chats are
+   * named from their peer, and pictures are downloaded (a few per pass, retried daily). Runs after the import and then
+   * every half hour; cheap when nothing is missing.
+   */
+  async refreshPeople(): Promise<void> {
+    this.peopleAt = Date.now();
+    await this.serial(async () => {
+      const me = await this.me();
+      const ids = new Set<string>();
+      const peerOf = new Map<string, string>();
+      for (const c of this.ctx.repo.listChats()) {
+        if (c.removed_at !== null && c.message_count === 0) continue;
+        if (c.kind === 'user' && c.peer_id) {
+          ids.add(c.peer_id);
+          peerOf.set(c.id, c.peer_id);
+        }
+      }
+      const senders = this.ctx.repo.db.prepare('SELECT DISTINCT sender_id AS id FROM messages WHERE sender_id IS NOT NULL AND from_me = 0 LIMIT 600').all() as { id: string }[];
+      for (const s of senders) if (s.id !== me) ids.add(s.id);
+      const missing = [...ids].filter((id) => !this.profiles.has(id));
+      for (let i = 0; i < missing.length; i += 20) {
+        await this.loadProfiles(missing.slice(i, i + 20));
+        await sleep(SPACING_MS);
+      }
+      for (const id of ids) this.applyProfile(id);
+      for (const [chatId, peer] of peerOf) {
+        const p = this.profiles.get(peer);
+        if (p?.name || p?.username) this.ingest.thread({ id: chatId, kind: 'user', peerId: peer, name: p.name ?? p.username });
+      }
+      this.peopleAt = Date.now();
+    });
+    await this.syncAvatars(10).catch((e: Error) => this.ctx.log.debug({ err: e.message }, 'avatar pass failed'));
+  }
+
+  peopleAge(): number {
+    return Date.now() - this.peopleAt;
+  }
+
+  /** Downloads a few missing profile pictures (a failed one is tried again after a day, a good one is renewed weekly). */
+  async syncAvatars(max: number): Promise<number> {
+    const dl = this.hooks.downloader?.() ?? null;
+    if (!dl) return 0;
+    const DAY = 86_400_000;
+    const now = Date.now();
+    let done = 0;
+    for (const c of this.ctx.repo.chatsNeedingAvatar(now - 7 * DAY, 80)) {
+      if (done >= max) break;
+      if (c.removed_at !== null && !c.avatar_checked_at) continue;
+      const url = c.kind === 'user' ? this.profiles.get(c.peer_id ?? '')?.avatar : this.groupAvatars.get(c.id);
+      if (!url) continue;
+      done++;
+      const r = await downloadToMedia(this.ctx, dl, url, 'avatar', 'image/jpeg', 4 * 1024 * 1024).catch(() => null);
+      if (r?.status === 'ok') {
+        const old = c.avatar_media_id;
+        this.ctx.repo.setChatAvatar(c.id, r.mediaId, now);
+        if (c.kind === 'user' && c.peer_id) this.ctx.repo.setContactAvatar(c.peer_id, r.mediaId, now);
+        if (old && old !== r.mediaId) {
+          const m = this.ctx.repo.getMedia(old);
+          if (m) {
+            this.ctx.repo.deleteMedia(m.id);
+            await deleteMediaFile(this.ctx, m.path).catch(() => undefined);
+          }
+        }
+        this.ctx.events.emit({ type: 'chat_update', chatId: c.id });
+      } else {
+        this.ctx.repo.setChatAvatar(c.id, c.avatar_media_id, now - 6 * DAY);
+      }
+      await sleep(300);
+    }
+    return done;
   }
 
   /** The conversation exists in the database (its name arrives asynchronously from the profile lookup). */
@@ -362,11 +468,11 @@ export class ImEngine {
       const part = want.slice(i, i + 20);
       try {
         const j = (await this.t.getJson(`https://www.tiktok.com/tiktok/v1/im/user/profile/?aid=${IM_AID}&user_ids=${encodeURIComponent(JSON.stringify(part))}`)) as {
-          users?: { im_user_profile?: { user_id_str?: string; unique_id?: string; nick_name?: string } }[];
+          users?: { im_user_profile?: { user_id_str?: string; unique_id?: string; nick_name?: string; avatars?: { avatar_medium?: { url_list?: string[] }; avatar_thumb?: { url_list?: string[] } } } }[];
         };
         for (const u of j.users ?? []) {
           const p = u.im_user_profile;
-          if (p?.user_id_str) this.profiles.set(p.user_id_str, { name: p.nick_name || null, username: p.unique_id || null });
+          if (p?.user_id_str) this.profiles.set(p.user_id_str, { name: p.nick_name || null, username: p.unique_id || null, avatar: p.avatars?.avatar_medium?.url_list?.[0] ?? p.avatars?.avatar_thumb?.url_list?.[0] ?? null });
         }
       } catch {
         /* try again on a later message */
