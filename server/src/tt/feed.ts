@@ -538,7 +538,7 @@ export class FeedService {
     return this.run(async () => {
       const agent = await this.ensureAgent();
       await this.pin(agent, id);
-      await agent.openComments();
+      await this.freshComments(agent);
       // The panel opens before its rows are filled (placeholders render first), so wait for real text: returning at
       // `open` alone showed an empty comment list on every video.
       const deadline = Date.now() + 9000;
@@ -556,6 +556,19 @@ export class FeedService {
     });
   }
 
+  /** Closes a panel left open by another video (it would be read as this video's comments), then opens this one's. */
+  private async freshComments(agent: FeedAgent): Promise<void> {
+    const open = await agent.comments().catch(() => null);
+    if (open?.open) {
+      await agent.closeComments().catch(() => undefined);
+      for (let i = 0; i < 8; i++) {
+        await sleep(250);
+        if (!(await agent.comments().catch(() => null))?.open) break;
+      }
+    }
+    await agent.openComments();
+  }
+
   async comment(id: string, text: string): Promise<FeedComment[]> {
     const body = text.trim();
     if (!body) throw Errors.validation('The comment is empty.');
@@ -563,7 +576,7 @@ export class FeedService {
     return this.run(async () => {
       const agent = await this.ensureAgent();
       await this.pin(agent, id);
-      await agent.openComments();
+      await this.freshComments(agent);
       const deadline = Date.now() + 8000;
       while (Date.now() < deadline) {
         const panel = await agent.comments().catch(() => null);

@@ -69,7 +69,7 @@ export const DEFAULT_FEED_SELECTORS: FeedSelectors = {
 
 const AGENT = String.raw`
 (() => {
-  if (window.__ttf && window.__ttf.version === 2) return;
+  if (window.__ttf && window.__ttf.version === 3) return;
   const S = __SELECTORS__;
   const vis = (el) => {
     if (!el || !el.getBoundingClientRect) return false;
@@ -418,7 +418,11 @@ const AGENT = String.raw`
   const closeComments = () => {
     const panel = commentPanel();
     if (!panel) return { ok: true };
-    const close = all('[aria-label*="close" i], [data-e2e*="close"]', panel.parentElement || panel).find(vis);
+    // The panel's own "exit" button (data-key-interaction="comment_close"); without it the panel stayed open on the
+    // previous video and the next "open" read its stale rows.
+    const scope = panel.closest('[class*="CommentSidebar"]') || panel.parentElement || document;
+    const close = all('[data-key-interaction="comment_close"] button, [class*="DivCloseButtonWrapper"] button, button[aria-label="exit" i], [aria-label*="close" i], [data-e2e*="close"]', scope).find(vis)
+      || all('[data-key-interaction="comment_close"] button, button[aria-label="exit" i]').find(vis);
     if (close) { close.click(); return { ok: true }; }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
     return { ok: true };
@@ -468,33 +472,29 @@ const AGENT = String.raw`
     return { open: true, comments: rows.slice(0, 60).map((row, i) => readComment(row, i)) };
   };
 
-  const postComment = (text) => {
+  /** Tags the comment box so the Node side can focus it and type with real key events (Draft.js ignores execCommand). */
+  const tagCommentInput = () => {
     const panel = commentPanel();
-    if (!panel) return { ok: false, error: 'no_panel' };
-    const input = first(S.commentInput, panel)[0] || first(S.commentInput)[0];
-    if (!input) return { ok: false, error: 'no_input' };
-    input.focus();
-    const range = document.createRange();
-    range.selectNodeContents(input);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    document.execCommand('delete', false, null);
-    const typed = document.execCommand('insertText', false, text);
-    if (!typed) {
-      input.textContent = text;
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
-    }
-    // The submit control usually sits next to the box, outside the list container: look in the panel, then the page.
-    const posted = clickIn(S.commentPost, panel) || clickIn(S.commentPost, document);
-    if (!posted) {
-      for (const t of ['keydown', 'keypress', 'keyup']) input.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
-    }
-    return { ok: true, via: posted ? 'button' : 'enter' };
+    const input = (panel && first(S.commentInput, panel.closest('[class*="CommentSidebar"]') || panel.parentElement || document)[0]) || first(S.commentInput)[0];
+    if (!panel || !input) return { ok: false, error: panel ? 'no_input' : 'no_panel' };
+    const editor = input.matches('[contenteditable="true"]') ? input : input.querySelector('[contenteditable="true"]') || input;
+    for (const old of all('[data-ttl-comment="1"]')) old.removeAttribute('data-ttl-comment');
+    editor.setAttribute('data-ttl-comment', '1');
+    return { ok: true };
+  };
+
+  /** The text in the box and whether TikTok's Post button is enabled yet. */
+  const commentSendState = () => {
+    const editor = document.querySelector('[data-ttl-comment="1"]');
+    const post = first(S.commentPost)[0] || null;
+    if (post) { for (const old of all('[data-ttl-post="1"]')) old.removeAttribute('data-ttl-post'); post.setAttribute('data-ttl-post', '1'); }
+    return { text: editor ? txt(editor) : '', hasPost: !!post, enabled: !!post && !post.disabled && post.getAttribute('aria-disabled') !== 'true' };
   };
 
   window.__ttf = {
-    version: 2,
+    version: 3,
+    tagCommentInput: () => tagCommentInput(),
+    commentSendState: () => commentSendState(),
     edge: (d) => edge(d),
     current: () => current(),
     step: (d) => step(d),
@@ -504,7 +504,6 @@ const AGENT = String.raw`
     openComments: () => openComments(),
     closeComments: () => closeComments(),
     comments: () => comments(),
-    postComment: (t) => postComment(t),
     queue: (n) => queue(n),
     state: () => ({ url: location.pathname, hasItem: !!currentEl() }),
   };
@@ -653,7 +652,36 @@ export class FeedAgent {
     return this.call('comments');
   }
 
-  postComment(text: string): Promise<{ ok: boolean; via?: string; error?: string }> {
-    return this.call('postComment', text);
+  /**
+   * Types [text] into the comment box with real key events and presses Post once TikTok enables it. The box is Draft.js:
+   * programmatic insertText fills the DOM but leaves Post disabled.
+   */
+  async postComment(text: string): Promise<{ ok: boolean; via?: string; error?: string }> {
+    const sel = '[data-ttl-comment="1"]';
+    const tagged = await this.call<{ ok: boolean; error?: string }>('tagCommentInput');
+    if (!tagged.ok) return { ok: false, error: tagged.error ?? 'no_input' };
+    try {
+      await this.page.focus(sel);
+      await this.page.keyboard.down('Control');
+      await this.page.keyboard.press('KeyA');
+      await this.page.keyboard.up('Control');
+      await this.page.keyboard.press('Backspace');
+      for (let at = 0; at < text.length; at += 24) {
+        await this.page.focus(sel).catch(() => undefined);
+        await this.page.keyboard.type(text.slice(at, at + 24), { delay: 12 });
+      }
+    } catch {
+      return { ok: false, error: 'focus_failed' };
+    }
+    let state = await this.call<{ text: string; enabled: boolean }>('commentSendState');
+    for (let i = 0; i < 10 && !state.enabled; i++) {
+      await new Promise<void>((r) => setTimeout(r, 200));
+      state = await this.call<{ text: string; enabled: boolean }>('commentSendState');
+    }
+    if (state.text.trim() !== text.trim() || !state.enabled) return { ok: false, error: 'not_typed' };
+    const clicked = await this.page.click('[data-ttl-post="1"]').then(() => true, () => false);
+    if (clicked) return { ok: true, via: 'button' };
+    await this.page.keyboard.press('Enter');
+    return { ok: true, via: 'enter' };
   }
 }

@@ -1,5 +1,14 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.5.1: comments (stale panel, and Post stayed disabled)
+
+* The comment panel's close control is `[data-key-interaction="comment_close"] button` (`aria-label="exit"`); the old
+  selector (`[aria-label*=close]`) matched nothing, so the panel stayed open and the next video "opened" with the previous
+  video's rows. `closeComments` now clicks the real button and `comments()`/`comment()` close a left-over panel first.
+* The comment box is Draft.js like the messages composer: `execCommand('insertText')` fills the DOM but TikTok's Post button
+  stays `disabled`. Posting now types with real key events (puppeteer) and clicks Post once it is enabled. Header count
+  ("Comments 12") equals the item's comment stat — a handy check that the panel belongs to the video.
+
 ## 2026-10-22 — v1.5.0: sending hung while the feed was open, feed videos 404'd, the feed was laggy
 
 Found by attaching to the live browser on the deployment (CT 124) read-only:
