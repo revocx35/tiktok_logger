@@ -1,4 +1,5 @@
-import { PassThrough, once } from 'node:stream';
+import { once } from 'node:events';
+import { PassThrough } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FeedCommentPage, FeedItem } from '../../../shared/api.js';
