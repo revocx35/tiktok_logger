@@ -335,13 +335,20 @@ export class FeedService {
       const agent = await this.ensureAgent();
       await this.pin(agent, id);
       await agent.openComments();
-      const deadline = Date.now() + 8000;
+      // The panel opens before its rows are filled (placeholders render first), so wait for real text: returning at
+      // `open` alone showed an empty comment list on every video.
+      const deadline = Date.now() + 9000;
+      let seen: { id: string; author: { username: string | null; name: string | null; avatar: string | null }; text: string; likes: number | null; replies: unknown[] }[] = [];
       while (Date.now() < deadline) {
         const panel = await agent.comments().catch(() => null);
-        if (panel?.open) return panel.comments.map(toComment);
+        if (panel?.open) {
+          seen = panel.comments;
+          if (seen.some((c) => c.text.trim())) return seen.map(toComment);
+        }
         await sleep(300);
       }
-      throw new AppError(504, 'comments_timeout', "TikTok's comments did not open. Try again.");
+      if (seen.length === 0) throw new AppError(504, 'comments_timeout', "TikTok's comments did not open. Try again.");
+      return seen.map(toComment);
     });
   }
 
