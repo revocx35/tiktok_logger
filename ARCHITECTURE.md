@@ -173,7 +173,10 @@ called with `credentials:'include'` from the tab). When it answers, everything i
   90 s and ingest is idempotent, so nothing is lost or doubled;
 * **unsends are read** (`s:is_recalled` placeholders in `get_by_conversation`), not inferred from what vanished;
 * **the socket** (`im-ws-sg…/ws/v2`) is LZ4 + protobuf and yields typed events (chat, recall, reaction, receipt, typing);
-* **sending** is `/v1/message/send` with a per-send DPoP proof; media uploads still go through the page;
+* **sending** is `/v1/message/send` with a per-send DPoP proof (text, `aweType` 703 replies, `aweType` 800 shared-post
+  cards), reactions are `/v1/message/set_property` (705/10008, `action_flag` 2 in a group); media uploads still go
+  through the page; a card TikTok silently drops is detected by reading the conversation back and the link is sent
+  instead;
 * **profiles** (`/tiktok/v1/im/user/profile/`) name chats and group senders and fill the avatars.
 
 When the probe fails (or the origin is the test double) the v1.0–v1.5 page path runs unchanged: poll the open
@@ -488,6 +491,7 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | GET | /api/feed | ✓ | `{item}`: the video in view (`FeedItem`, media as app URLs) |
 | GET | /api/feed/window?limit=3 | ✓ | `{items,current}`: the video in view plus the next few (the clients swipe these) |
 | POST | /api/feed/goto | ✓ | `{id}` → `{items,current}`: move the remote page to a swiped-to video |
+| POST | /api/feed/:id/share | ✓ | `{chatId}`: share the video as a TikTok card (the link is sent when TikTok drops the card) |
 | POST | /api/feed/step | ✓ | `{dir: next\|prev}` → `{item}` |
 | POST | /api/feed/:id/like | ✓ | `{like}` → `{liked}` (TikTok's own control) |
 | GET · POST | /api/feed/:id/comments · /api/feed/:id/comment | ✓ | `{comments}` · posts `{text}` (≤150) |
@@ -501,7 +505,7 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | GET | /api/media/:mediaId (Range) · /api/media-zip?ids= · /api/media-feed?after= | ✓ | files |
 | GET | /api/deleted?before= · /api/search?q=&chatId= | ✓ | unsent feed · search |
 | POST | /api/chats/:chatId/send · /api/uploads (raw) · /api/chats/:chatId/send-media · DELETE /api/uploads/:id | ✓ | sending |
-| POST | /api/messages/:messageId/react · unsend · edit · /api/chats/:chatId/read | ✓ | `not_supported` for react/unsend/edit on TikTok (§4) |
+| POST | /api/messages/:messageId/react · unsend · edit · /api/chats/:chatId/read | ✓ | react goes through `/v1/message/set_property` (705/10008); unsend/edit are `not_supported` (§4) |
 | GET | /api/admin/overview · /api/admin/audit | ✓ admin | users, ports, admin log (gateway) |
 | POST | /api/admin/users · /api/admin/users/:id/reset · /delete | ✓ admin | create with temporary password · reset · delete |
 | PATCH | /api/admin/users/:id | ✓ admin | move to another port, disable/enable |
