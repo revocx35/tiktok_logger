@@ -286,6 +286,34 @@ describe('ImEngine', () => {
       expect(ctx.repo.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE source = 'sent'").get()).toEqual({ n: 0 });
     });
 
+    it('sends a video card, and the link instead when TikTok does not keep the card', async () => {
+      standard();
+      await engine.initialImport(() => undefined);
+      t.handlers[SEND_PATH] = () => sendOk('7700000000000000031');
+      // The history never shows the card: TikTok took the request and dropped the message.
+      t.handlers[HISTORY_PATH] = () => historyBody([row({ id: '7700000000000000009', tsUs: NOW_US, sender: PEER, text: 'older' })]);
+      const id = await engine.sendShare(CONV, { itemId: '7412345678901234567', uid: PEER, title: 'a video' });
+      const sends = t.calls.filter((c) => c.path === SEND_PATH);
+      expect(sends).toHaveLength(2); // the card, then the link
+      const first = JSON.parse(str(sub(sub(readFields(sends[0]!.body), 8)!, 100)!, 4));
+      expect(first).toMatchObject({ aweType: 800, itemId: '7412345678901234567' });
+      const second = JSON.parse(str(sub(sub(readFields(sends[1]!.body), 8)!, 100)!, 4));
+      expect(second).toEqual({ aweType: 0, text: 'https://www.tiktok.com/@_/video/7412345678901234567' });
+      expect(id).toBe('7700000000000000031'); // the fallback's own message (the stub answers with the same id)
+    });
+
+    it('keeps the card as the message when TikTok stored it', async () => {
+      standard();
+      await engine.initialImport(() => undefined);
+      t.handlers[SEND_PATH] = () => sendOk('7700000000000000032');
+      // The conversation's newest row is the card itself: the check finds the id and keeps it.
+      t.handlers[HISTORY_PATH] = () => historyBody([row({ id: '7700000000000000032', tsUs: NOW_US, sender: ME, text: 'card' })]);
+      const id = await engine.sendShare(CONV, { itemId: '7412345678901234567', uid: PEER });
+      expect(id).toBe('7700000000000000032');
+      expect(ctx.repo.getMessage('7700000000000000032')).toMatchObject({ source: 'sent' });
+      expect(t.calls.filter((c) => c.path === SEND_PATH)).toHaveLength(1); // no link fallback
+    });
+
     it('does not guess for a conversation TikTok never listed', async () => {
       standard();
       await engine.initialImport(() => undefined);
