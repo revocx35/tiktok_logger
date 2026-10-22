@@ -176,10 +176,21 @@ called with `credentials:'include'` from the tab). When it answers, everything i
 * **sending** is `/v1/message/send` with a per-send DPoP proof (text, `aweType` 703 replies, `aweType` 800 shared-post
   cards), reactions are `/v1/message/set_property` (705/10008, `action_flag` 2 in a group); media uploads still go
   through the page; a card TikTok silently drops is detected by reading the conversation back and the link is sent
-  instead. **The envelope's field 6 is the message type** (Text 7, Video 8, Story 1025): a shared post must be sent as
-  **Video**, with the content JSON TikTok's own web client builds (`aweType` 800, `itemId`, `uid`, `secUID`,
-  `content_thumb`/`cover_url` as `{url_list, uri}` where `uri` is the cover URL). Sending that body as Text is accepted
-  with status 0 and never stored — the bug that kept a shared video from arriving as a card until v1.11.0;
+  instead. **Sharing a post as a card is two rules that both fail silently** (verified live 2026-10-23 by sending each
+  variant into a chat and reading it back; TikTok answers status 0 and stores nothing otherwise):
+
+  1. **The envelope's field 6 is the message type** — `Text` 7, `Video` 8, `Story` 1025 (private image 1802). A share
+     goes out as **Video**; the same body as Text is dropped.
+  2. **The card's `content_thumb` is the author's avatar**, not the video's cover. The rest of the body is what TikTok's
+     own web client builds: `{"aweType":800, itemId, uid, secUID, content_thumb:{url_list,uri}, content_name,
+     cover_url:{url_list,uri}, cover_width, cover_height}`, `uri` being the URL itself and no `content_title`. The cover
+     goes in `cover_url`.
+
+  Method that found it, worth reusing: TikTok's web client sends DM writes over its **WebSocket**, so a `fetch`/XHR hook
+  records nothing (`tt/im/` capture for reading frames is separate). Capture with CDP `Network.webSocketFrameSent`
+  while driving the real "Share to" panel (share icon → recipient → Send), then decode: frame field 1 = command
+  (10004 = send), envelope at 8, message body at 8.8.100 (`1` convId, `2` conversation type, `3` sourceId, `4` content
+  JSON as plain text, `5` tags, `6` message type, `7` "deprecated", `8` client id);
 * **profiles** (`/tiktok/v1/im/user/profile/`) name chats and group senders and fill the avatars.
 
 When the probe fails (or the origin is the test double) the v1.0–v1.5 page path runs unchanged: poll the open

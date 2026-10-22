@@ -72,3 +72,11 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
   fake path; the engine fetches private photos itself) — look at it when the media path is next touched.
 - A page agent installed in a live tab survives an app restart: bump its `version` when its methods change.
 - Opening a conversation marks it read on TikTok; do not add extra opening.
+- **Sharing a post as a card fails silently unless two things are exact**: the IM send's envelope field 6 must be the
+  message type **8 (Video)** (7 = Text is accepted with status 0 and stored nowhere), and the card's `content_thumb`
+  must be the **author's avatar** (a video cover there is dropped the same way). `secUID` is camelCase, each image is
+  `{url_list, uri}` with `uri` = the URL, and there is no `content_title`. `tt/im/proto.ts` (`MESSAGE_TYPE_VIDEO`) and
+  `ApiFeed.share` hold both rules; `tt/feedApi.test.ts` and `tt/im/proto.test.ts` pin them.
+- The IM SDK of TikTok's web client writes messages to its **WebSocket**, so `fetch`/XHR hooks capture nothing: use CDP
+  `Network.webSocketFrameSent` on a tab while driving the real UI, then decode the frame (field 1 = command, envelope in
+  field 8, body at 8.8.100, content JSON in 8.8.100.4).
