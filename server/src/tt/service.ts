@@ -587,8 +587,22 @@ export class TtService implements TtController, ChatDriver {
     this.ctx.events.emit({ type: 'chat_update', chatId: t.id });
   }
 
+  /**
+   * A snapshot belongs to [chatId] only when the page really is on that conversation. Reading chat B while the page
+   * sits on chat A would store A's messages under B and then report B's messages as deleted, so a mismatched read is
+   * dropped instead.
+   */
+  private snapshotIsFor(chatId: string, snap: ThreadSnapshot): boolean {
+    if (!snap.threadId) return false;
+    return this.chatKeyFor(snap.threadId) === chatId || snap.threadId === chatId;
+  }
+
   /** The sync read a conversation: store it, and on a re-check also look for messages that vanished. */
   private afterChat(chatId: string, snap: ThreadSnapshot, phase: 'history' | 'reconcile'): void {
+    if (!this.snapshotIsFor(chatId, snap)) {
+      this.ctx.log.debug({ chat: maskId(chatId) }, 'read skipped: the page is on another conversation');
+      return;
+    }
     const stored = this.ingestSnapshot(chatId, snap, phase);
     this.trackSeen(chatId, snap, stored);
     if (phase === 'reconcile') this.judgeMissing(chatId, snap);
@@ -641,8 +655,14 @@ export class TtService implements TtController, ChatDriver {
   private judgeMissing(chatId: string, snap: ThreadSnapshot): void {
     const win = this.seenWindows.get(chatId);
     if (!win) return;
+    if (!this.snapshotIsFor(chatId, snap)) return;
     const times = snap.rows.map((r) => r.ts).filter((t): t is number => typeof t === 'number');
     if (times.length < 2) return;
+    // A read that starts later than the previous one only saw part of the conversation (TikTok renders the list in
+    // pieces, and a conversation just opened can still be filling in). Judging deletions against a partial read marks
+    // messages the sender never touched as unsent, so this pass is skipped unless the read reaches back as far as the
+    // previous one did.
+    if (Math.min(...times) > win.from + 120_000) return;
     // Only what this read covered is judged: stored messages in that range that the read no longer shows.
     this.ingest.markMissing(chatId, win.ids, Math.min(...times), Math.max(...times));
   }
