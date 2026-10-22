@@ -19,11 +19,17 @@ export function FeedPage() {
   const [loading, setLoading] = useState(true);
   const [muted, setMuted] = useState(true);
   const [comments, setComments] = useState<FeedComment[] | null>(null);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [sending, setSending] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,11 +48,18 @@ export function FeedPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setVideoReady(false);
+    setVideoError(null);
+  }, [item?.id, reloadKey]);
+
   const step = useCallback(
     async (dir: 'next' | 'prev') => {
       if (busy) return;
       setBusy(true);
+      setCommentsOpen(false);
       setComments(null);
+      setCommentsError(null);
       try {
         const r = await api.feedStep(dir);
         setItem(r.item);
@@ -91,22 +104,31 @@ export function FeedPage() {
     }
   };
 
-  const openComments = async () => {
+  const loadComments = async () => {
     if (!item) return;
-    setSending(true);
+    setCommentsLoading(true);
+    setCommentsError(null);
     try {
       const r = await api.feedComments(item.id);
       setComments(r.comments);
-      setError(null);
     } catch (e) {
-      setError(errorMessage(e));
+      setCommentsError(errorMessage(e));
     } finally {
-      setSending(false);
+      setCommentsLoading(false);
     }
   };
 
-  const closeComments = () => {
+  const openComments = () => {
+    if (!item) return;
+    setCommentsOpen(true);
     setComments(null);
+    void loadComments();
+  };
+
+  const closeComments = () => {
+    setCommentsOpen(false);
+    setComments(null);
+    setCommentsError(null);
     setCommentText('');
     void api.feedCloseComments().catch(() => undefined);
   };
@@ -137,25 +159,40 @@ export function FeedPage() {
           </div>
         ) : item ? (
           <>
+            {item.video?.poster ? <img className="feed-poster" src={item.video.poster} alt="" aria-hidden="true" /> : null}
             <video
-              key={item.id}
+              key={`${item.id}:${reloadKey}`}
               ref={videoRef}
-              className="feed-video"
+              className={videoReady ? 'feed-video ready' : 'feed-video'}
               src={item.video?.src ?? undefined}
               poster={item.video?.poster ?? undefined}
               autoPlay
               loop
               playsInline
+              preload="auto"
               muted={muted}
+              onCanPlay={() => setVideoReady(true)}
+              onPlaying={() => setVideoReady(true)}
+              onError={() => setVideoError('The video could not be played.')}
               onClick={() => setMuted((m) => !m)}
             />
-            {!item.video?.src ? (
+            {item.video?.src && !videoReady && !videoError ? (
+              <div className="feed-video-loading">
+                <Spinner size={26} />
+              </div>
+            ) : null}
+            {!item.video?.src || videoError ? (
               <div className="feed-no-video">
                 <Icon name="video" size={36} />
-                <p>This video has no playable source (TikTok may still be loading it).</p>
-                <button className="btn" onClick={() => void load()}>
-                  Reload
-                </button>
+                <p>{videoError ?? 'This video has no playable source yet.'}</p>
+                <div className="feed-no-video-actions">
+                  <button className="btn" onClick={() => setReloadKey((k) => k + 1)}>
+                    Play again
+                  </button>
+                  <button className="btn ghost" onClick={() => void load()}>
+                    Reload the feed
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -218,7 +255,19 @@ export function FeedPage() {
         )}
       </div>
 
-      {comments ? <CommentsPanel comments={comments} text={commentText} setText={setCommentText} onPost={() => void postComment()} onClose={closeComments} busy={sending} /> : null}
+      {commentsOpen ? (
+        <CommentsPanel
+          comments={comments}
+          loading={commentsLoading}
+          error={commentsError}
+          onRetry={() => void loadComments()}
+          text={commentText}
+          setText={setCommentText}
+          onPost={() => void postComment()}
+          onClose={closeComments}
+          busy={sending}
+        />
+      ) : null}
       {shareOpen && item ? <ShareDialog item={item} onClose={() => setShareOpen(false)} onSent={(name) => { setShareOpen(false); setNotice(`Sent to ${name}.`); }} /> : null}
 
       <div className="feed-errors">
@@ -236,13 +285,19 @@ export function FeedPage() {
 
 function CommentsPanel({
   comments,
+  loading,
+  error,
+  onRetry,
   text,
   setText,
   onPost,
   onClose,
   busy,
 }: {
-  comments: FeedComment[];
+  comments: FeedComment[] | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
   text: string;
   setText: (v: string) => void;
   onPost: () => void;
@@ -252,14 +307,30 @@ function CommentsPanel({
   return (
     <aside className="feed-comments" aria-label="Comments">
       <header>
-        <strong>{comments.length === 1 ? '1 comment' : `${comments.length} comments`}</strong>
+        <strong>
+          {loading ? 'Loading comments…' : comments && comments.length > 0 ? (comments.length === 1 ? '1 comment' : `${comments.length} comments`) : 'Comments'}
+        </strong>
         <button className="icon-btn" onClick={onClose} title="Close">
           <Icon name="close" size={18} />
         </button>
       </header>
       <div className="feed-comment-list">
-        {comments.length === 0 ? <p className="muted small">No comments on this video yet.</p> : null}
-        {comments.map((c) => (
+        {loading ? (
+          <div className="feed-comments-state">
+            <Spinner size={22} />
+            <p className="muted small">Opening the comment panel in TikTok…</p>
+          </div>
+        ) : null}
+        {error && !loading ? (
+          <div className="feed-comments-state">
+            <p className="small">{error}</p>
+            <button className="btn" onClick={onRetry}>
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {!loading && !error && comments && comments.length === 0 ? <p className="muted small">No comments on this video yet.</p> : null}
+        {(comments ?? []).map((c) => (
           <CommentRow key={c.id} c={c} depth={0} />
         ))}
       </div>

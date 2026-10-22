@@ -29,8 +29,10 @@ export interface TtFeed {
   comments(id: string): Promise<FeedComment[]>;
   comment(id: string, text: string): Promise<FeedComment[]>;
   closeComments(): Promise<void>;
-  mimeOf(ref: string): string | null;
-  streamMedia(ref: string, write: (chunk: Buffer) => Promise<void>): Promise<{ mime: string | null; size: number }>;
+  /** The bytes behind a media reference (video or poster), from the prefetched cache when possible. */
+  mediaOf(ref: string): Promise<{ mime: string; data: Buffer } | null>;
+  mediaCached(ref: string): boolean;
+  mediaStats(): { refs: number; cached: number; bytes: number; inflight: number };
 }
 
 /** Control surface of the TikTok integration, used by the HTTP layer. */
@@ -124,8 +126,9 @@ export class NullTt implements TtController {
     comments: notConnected,
     comment: notConnected,
     closeComments: async () => undefined,
-    mimeOf: () => null,
-    streamMedia: notConnected,
+    mediaOf: async () => null,
+    mediaCached: () => false,
+    mediaStats: () => ({ refs: 0, cached: 0, bytes: 0, inflight: 0 }),
   };
   readonly sender: TtSender = {
     sendText: notConnected,

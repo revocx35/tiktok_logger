@@ -1,10 +1,9 @@
-import { once } from 'node:events';
-import { PassThrough } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FeedCommentPage, FeedItem } from '../../../shared/api.js';
 import type { AppContext } from '../context.js';
 import { Errors } from '../errors.js';
+import { parseRange } from './media.js';
 
 /**
  * The For You feed: browsing, liking, comments and the video stream. All of it is done by the server's browser; these
@@ -49,29 +48,37 @@ export function registerFeedRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 
   /**
-   * The video/poster, streamed through the browser. Signed CDN links never reach the client; the ref is short-lived
-   * and only exists while the feed tab is open.
+   * The video or poster, served from the server's cache.
+   *
+   * The bytes are downloaded once through the browser (and the next videos are already being downloaded in the
+   * background), then served whole with a real Content-Length and byte ranges. Both matter on a phone: mobile Safari
+   * refuses to play a video that cannot be ranged and hides the duration when the length is not known.
    */
   app.get('/api/feed/media/:ref', { config: BROWSING }, async (req, reply) => {
     const { ref } = RefParam.parse(req.params);
-    const mime = ctx.tt.feed.mimeOf(ref);
-    const pass = new PassThrough();
-    pass.on('error', () => undefined);
-    void ctx.tt.feed
-      .streamMedia(ref, async (chunk) => {
-        if (!pass.write(chunk)) await once(pass, 'drain');
-      })
-      .then(() => pass.end())
-      .catch((err: unknown) => {
-        // Nothing has been sent yet when the first fetch fails: let Fastify turn it into a proper error.
-        pass.destroy(err instanceof Error ? err : new Error('stream failed'));
-      });
+    const f = await ctx.tt.feed.mediaOf(ref);
+    if (!f) throw Errors.notFound('Media');
+    const size = f.data.length;
+    const cacheable = ctx.tt.feed.mediaCached(ref);
     reply
-      .header('content-type', mime ?? 'application/octet-stream')
-      .header('cache-control', 'private, no-store')
+      .header('content-type', f.mime)
+      .header('cache-control', cacheable ? 'private, max-age=3600' : 'private, max-age=60')
       .header('x-content-type-options', 'nosniff')
-      .header('accept-ranges', 'none');
-    if (req.headers.range) throw Errors.conflict('Seeking is not supported for feed video.');
-    return reply.send(pass);
+      .header('accept-ranges', 'bytes')
+      .header('etag', `"${ref}-${size}"`);
+    const range = parseRange(req.headers.range, size);
+    if (range === 'invalid') {
+      reply.code(416).header('content-range', `bytes */${size}`);
+      return reply.send();
+    }
+    if (!range) {
+      reply.header('content-length', String(size));
+      return reply.send(f.data);
+    }
+    reply
+      .code(206)
+      .header('content-range', `bytes ${range.start}-${range.end}/${size}`)
+      .header('content-length', String(range.end - range.start + 1));
+    return reply.send(f.data.subarray(range.start, range.end + 1));
   });
 }

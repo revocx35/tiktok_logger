@@ -3004,3 +3004,89 @@ button.reel-action:disabled {
     right: 10px;
   }
 }
+
+/* Feed: the poster shows while the video loads, and the video fades in when it can play (mobile Safari will not
+   render a video element until it has buffered, so a bare black box looked like a broken feed). */
+.feed-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: blur(1px) brightness(0.7);
+  pointer-events: none;
+}
+.feed-video {
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+.feed-video.ready {
+  opacity: 1;
+}
+.feed-video-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+  color: #fff;
+}
+.feed-no-video {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.feed-no-video-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.feed-no-video .btn.ghost {
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+.feed-comments-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 4px;
+  text-align: center;
+}
+/* Phone: the comment drawer covers the stage from the bottom instead of squeezing it from the side. */
+@media (max-width: 720px) {
+  .feed-comments {
+    top: auto;
+    left: 0;
+    width: 100%;
+    height: min(70%, 520px);
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.35);
+  }
+  .feed-overlay {
+    padding: 0 12px 16px;
+    gap: 10px;
+  }
+  .feed-rail {
+    gap: 6px;
+  }
+  .feed-act {
+    padding: 6px 8px;
+  }
+  .feed-act span {
+    font-size: 0.72em;
+  }
+  .feed-hint {
+    display: none;
+  }
+}

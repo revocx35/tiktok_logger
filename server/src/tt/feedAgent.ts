@@ -29,6 +29,7 @@ export interface FeedSelectors {
   commentPanel: string[];
   commentRow: string[];
   commentText: string[];
+  commentAuthor: string[];
   commentLike: string[];
   commentInput: string[];
   commentPost: string[];
@@ -55,9 +56,12 @@ export const DEFAULT_FEED_SELECTORS: FeedSelectors = {
   playCount: ['[data-e2e="video-views"]', 'strong[data-e2e="video-views"]'],
   nextButton: ['[data-e2e="arrow-right"]', 'button[aria-label*="next" i]', '[class*="ArrowRight"]'],
   prevButton: ['[data-e2e="arrow-left"]', 'button[aria-label*="previous" i]', '[class*="ArrowLeft"]'],
-  commentPanel: ['[data-e2e="comment-list"]', '[class*="DivCommentListContainer"]', '[class*="CommentListContainer"]'],
-  commentRow: ['[data-e2e="comment-level-1"]', '[data-e2e="comment-item"]', '[class*="DivCommentItemContainer"]', '[class*="CommentItem"]'],
-  commentText: ['[data-e2e="comment-level-1"] p', '[class*="DivCommentContentContainer"]', '[class*="CommentText"]', 'p'],
+  // The comment list has no data-e2e on its container and `comment-level-1` is the text span, not the row: the row is
+  // the wrapper class, and the author is the profile link inside it (checked on the live page).
+  commentPanel: ['[class*="DivCommentListContainer"]', '[data-e2e="comment-list"]', '[class*="CommentListContainer"]'],
+  commentRow: ['[class*="DivCommentItemWrapper"]', '[class*="DivCommentItemContainer"]', '[data-e2e="comment-item"]'],
+  commentText: ['[data-e2e="comment-level-1"]', '[class*="DivCommentContentContainer"]', '[class*="CommentText"]', 'p'],
+  commentAuthor: ['a[href^="/@"]', '[class*="DivUsernameContent"]', '[data-e2e="comment-username-1"]'],
   commentLike: ['[data-e2e="comment-like-count"]', '[class*="DivLikeCount"]'],
   commentInput: ['[data-e2e="comment-input"] div[contenteditable="true"]', '[data-e2e="comment-input"]', 'div[contenteditable="true"]'],
   commentPost: ['[data-e2e="comment-post"]', 'button[data-e2e*="post"]', 'button[type="submit"]'],
@@ -234,6 +238,36 @@ const AGENT = String.raw`
     };
   };
 
+  /**
+   * The videos around the one on screen, nearest first, with the signed URLs the page already has: this is what the
+   * server warms so the next swipe is instant. TikTok prints each item's position in its data-scroll-index attribute,
+   * so the order is the feed's own and not a guess.
+   */
+  const queue = (limit) => {
+    const nodes = all('[data-scroll-index]').map((el) => ({ el, idx: Number(el.getAttribute('data-scroll-index')) }));
+    const ordered = nodes.filter((x) => Number.isFinite(x.idx)).sort((a, b) => a.idx - b.idx);
+    const curEl = currentEl();
+    const curIdx = curEl && curEl.getAttribute ? Number(curEl.getAttribute('data-scroll-index')) : NaN;
+    const from = Number.isFinite(curIdx) ? ordered.filter((x) => x.idx >= curIdx) : ordered;
+    const out = [];
+    for (const { el, idx } of from.slice(0, Math.max(1, Math.min(12, limit)))) {
+      const keyed = el.querySelector('[data-more-menu-item-id]');
+      const rawId = keyed ? keyed.getAttribute('data-more-menu-item-id') : null;
+      const id = rawId && /^\d{6,24}$/.test(rawId) ? rawId : null;
+      const av = el.querySelector('[data-e2e="video-author-avatar"]');
+      const a = av && av.closest('a[href^="/@"]');
+      const d = detailsFor(id);
+      out.push({
+        index: idx,
+        id,
+        author: a ? (a.getAttribute('href') || '').replace(/^\/@/, '') : null,
+        playAddr: d ? d.playAddr : null,
+        cover: d ? d.cover : null,
+      });
+    }
+    return out;
+  };
+
   const clickIn = (selectors, root) => {
     for (const sel of selectors) {
       const els = all(sel, root).filter(vis);
@@ -284,12 +318,14 @@ const AGENT = String.raw`
   };
 
   const readComment = (row, i) => {
-    const a = row.querySelector('a[href^="/@"]');
+    const a = first(S.commentAuthor, row)[0] || row.querySelector('a[href^="/@"]');
     const href = a ? a.getAttribute('href') || '' : '';
     const textEl = first(S.commentText, row)[0] || row;
     const body = textEl === row ? txt(row) : txt(textEl);
     const likeEl = first(S.commentLike, row)[0];
-    const replies = all('[data-e2e="comment-level-2"]', row).slice(0, 20).map((r2, j) => readComment(r2, j));
+    // Replies are full comment rows nested inside their parent's row (in a virtualised list), not bare text spans.
+    const nested = all(S.commentRow.join(','), row).filter((r2) => r2 !== row).slice(0, 6);
+    const replies = nested.map((r2, j) => readComment(r2, j));
     return {
       id: commentId(row, i),
       author: {
@@ -306,7 +342,14 @@ const AGENT = String.raw`
   const comments = () => {
     const panel = commentPanel();
     if (!panel) return { open: false, comments: [] };
-    const rows = first(S.commentRow, panel).filter((row) => !row.parentElement || !row.parentElement.closest('[data-e2e="comment-level-1"]'));
+    const all = first(S.commentRow, panel);
+    // A reply lives inside its parent's row: only rows with no comment row above them are top-level.
+    const rows = all.filter((row) => {
+      for (let p = row.parentElement; p && p !== panel; p = p.parentElement) {
+        if (S.commentRow.some((sel) => { try { return p.matches(sel); } catch (e) { return false; } })) return false;
+      }
+      return true;
+    });
     return { open: true, comments: rows.slice(0, 60).map((row, i) => readComment(row, i)) };
   };
 
@@ -344,6 +387,7 @@ const AGENT = String.raw`
     closeComments: () => closeComments(),
     comments: () => comments(),
     postComment: (t) => postComment(t),
+    queue: (n) => queue(n),
     state: () => ({ url: location.pathname, hasItem: !!currentEl() }),
   };
   return true;
@@ -362,6 +406,14 @@ export function mergeFeedSelectors(extra?: Record<string, string[]> | null): Fee
 }
 
 /** What the page reports about the video in view. */
+export interface RawQueueItem {
+  index: number;
+  id: string | null;
+  author: string | null;
+  playAddr: string | null;
+  cover: string | null;
+}
+
 export interface RawFeedItem {
   id: string | null;
   /** Straight from the page's bundled item struct: signed video URL, cover, exact stats. */
@@ -428,6 +480,11 @@ export class FeedAgent {
 
   current(): Promise<RawFeedItem | null> {
     return this.call('current');
+  }
+
+  /** The next videos in the feed, with the signed URLs the page already knows (used to warm the media cache). */
+  queue(limit = 4): Promise<RawQueueItem[]> {
+    return this.call('queue', limit);
   }
 
   step(dir: 'next' | 'prev'): Promise<{ ok: boolean; via?: string }> {

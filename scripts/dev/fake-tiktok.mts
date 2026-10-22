@@ -203,7 +203,7 @@ function feedHtml(): string {
 </div>
 <div id="comments">
   <header><strong>Comments</strong><button data-e2e="comment-close" onclick="closeComments()">✕</button></header>
-  <div id="clist" data-e2e="comment-list"></div>
+  <div id="clist" class="css-fake--DivCommentListContainer"></div>
   <div id="cform">
     <div id="cinput" data-e2e="comment-input" contenteditable="true" role="textbox"></div>
     <button id="cpost" data-e2e="comment-post" onclick="post()">Post</button>
@@ -275,13 +275,16 @@ function renderComments() {
   const it = currentItem();
   const box = document.getElementById('clist');
   box.innerHTML = '';
+  // Same shape as the live page: the row is a plain wrapper class, the text is the data-e2e span, the author is the
+  // profile link, and a reply is a whole row nested inside its parent's row (which is what the agent walks).
   const add = (c, reply, parent) => {
     const el = document.createElement('div');
-    el.className = 'comment' + (reply ? ' reply' : '');
-    el.setAttribute('data-e2e', reply ? 'comment-level-2' : 'comment-level-1');
+    el.className = 'css-fake--DivCommentItemWrapper' + (reply ? ' reply' : '');
     el.setAttribute('data-id', c.id);
-    el.innerHTML = '<a href="/@' + c.username + '">@' + c.username + '</a><p>' + c.text + '</p>' +
-      '<span data-e2e="comment-like-count">' + (c.likes || 0) + '</span>';
+    el.innerHTML = '<div class="css-fake--DivAvatarWrapper"><a href="/@' + c.username + '"><img src="/img/a.jpg"></a></div>' +
+      '<div class="css-fake--DivCommentContentWrapper"><a href="/@' + c.username + '">@' + c.username + '</a>' +
+      '<span data-e2e="comment-level-1">' + c.text + '</span>' +
+      '<span data-e2e="comment-like-count">' + (c.likes || 0) + '</span></div>';
     (parent || box).appendChild(el);
     return el;
   };

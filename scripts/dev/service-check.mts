@@ -177,15 +177,13 @@ try {
   const postedComments = await service.feed.comment(back.id, 'comment from the service check');
   check('a comment is posted', postedComments.some((c) => c.text === 'comment from the service check'), JSON.stringify(postedComments.map((c) => c.text)));
 
-  // The video itself: streamed through the browser into a buffer.
+  // The video itself: downloaded once through the browser, then served from the cache.
   const src = back.video?.src ?? '';
   const ref = src.split('/').pop() ?? '';
-  const chunks: Buffer[] = [];
-  const media = await service.feed.streamMedia(ref, async (c) => {
-    chunks.push(c);
-  });
-  const bytes = Buffer.concat(chunks);
-  check('the feed video streams through the browser', bytes.length > 0 && !!media.mime, `${bytes.length} bytes, ${media.mime}`);
+  const media = await service.feed.mediaOf(ref);
+  const again = await service.feed.mediaOf(ref);
+  check('the feed video comes through the browser', !!media && media.data.length > 0 && !!media.mime, `${media?.data.length ?? 0} bytes, ${media?.mime}`);
+  check('the second request is served from the cache', service.feed.mediaCached(ref) && again?.data.length === media?.data.length);
   await service.feed.closeComments();
 
   // The messages tab must still be logging after all that.

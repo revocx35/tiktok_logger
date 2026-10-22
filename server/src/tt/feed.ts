@@ -1,9 +1,9 @@
-import { randomBytes } from 'node:crypto';
 import type { Page } from 'puppeteer';
 import type { FeedComment, FeedItem } from '../../../shared/api.js';
 import type { AppContext } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import { BrowserDownloader } from './download.js';
+import { FeedMedia, type Fetched } from './feedMedia.js';
 import { FeedAgent, mergeFeedSelectors, type RawFeedItem } from './feedAgent.js';
 
 /**
@@ -19,15 +19,8 @@ export interface FeedPageProvider {
   feedPage(): Promise<{ page: Page; origin: string } | null>;
 }
 
-interface MediaRef {
-  url: string;
-  mime: string | null;
-  at: number;
-}
-
-const MEDIA_MAX = 200 * 1024 * 1024;
-const REF_TTL_MS = 30 * 60_000;
-const MAX_REFS = 64;
+/** How many videos ahead of the one on screen are downloaded in the background (the apps warm a few as well). */
+const PRELOAD_AHEAD = 3;
 
 /**
  * What the For You page's own JSON knows and the DOM does not: the item id (the DOM has no link to it) and the signed
@@ -144,7 +137,8 @@ export class FeedService {
   private origin = 'https://www.tiktok.com';
   private downloader: BrowserDownloader | null = null;
   private chain: Promise<unknown> = Promise.resolve();
-  private readonly refs = new Map<string, MediaRef>();
+  // As many parallel downloads as videos we warm, so one page's prefetches are not silently dropped.
+  private readonly media = new FeedMedia(PRELOAD_AHEAD);
   private lastId: string | null = null;
 
   constructor(
@@ -168,7 +162,7 @@ export class FeedService {
     this.page = null;
     this.downloader = null;
     this.lastId = null;
-    this.refs.clear();
+    this.media.clear();
   }
 
   private run<T>(fn: () => Promise<T>): Promise<T> {
@@ -212,7 +206,9 @@ export class FeedService {
       const raw = await agent.current().catch(() => null);
       if (!raw) return null;
       this.lastId = raw.id ?? this.lastId;
-      return this.toItem(raw);
+      const item = this.toItem(raw);
+      void this.warmAhead(agent);
+      return item;
     });
   }
 
@@ -233,7 +229,9 @@ export class FeedService {
           // Give the video element a moment to have a source.
           const withSrc = await this.waitForSrc(agent, 4000);
           this.lastId = withSrc.id ?? this.lastId;
-          return this.toItem(withSrc);
+          const item = this.toItem(withSrc);
+          void this.warmAhead(agent);
+          return item;
         }
       }
       throw new AppError(504, 'feed_timeout', 'TikTok did not show the next video in time.');
@@ -264,9 +262,9 @@ export class FeedService {
     const domSrc = raw.video?.src && !raw.video.src.startsWith('blob:') ? raw.video.src : null;
     const src = domSrc ?? details?.playAddr ?? known?.playAddr ?? null;
     const posterSrc = raw.video?.poster ?? details?.cover ?? known?.cover ?? null;
-    const video = src ? this.register(src, 'video/mp4') : null;
-    const poster = posterSrc ? this.register(posterSrc, 'image/jpeg') : null;
-    const avatar = raw.author.avatar ? this.register(raw.author.avatar, 'image/jpeg') : null;
+    const video = src ? this.media.ref(src) : null;
+    const poster = posterSrc ? this.media.ref(posterSrc) : null;
+    const avatar = raw.author.avatar ? this.media.ref(raw.author.avatar) : null;
     const pick = (a: number | null, b: number | null | undefined): number | null => (a ?? b ?? null);
     return {
       id,
@@ -367,50 +365,47 @@ export class FeedService {
 
   /* ----------------------------------------------------------------- media */
 
-  private register(url: string, mime: string | null): string {
-    const now = Date.now();
-    for (const [ref, v] of this.refs) if (now - v.at > REF_TTL_MS) this.refs.delete(ref);
-    const ref = randomBytes(12).toString('hex');
-    this.refs.set(ref, { url, mime, at: now });
-    while (this.refs.size > MAX_REFS) {
-      const oldest = [...this.refs.entries()].sort((a, b) => a[1].at - b[1].at)[0];
-      if (!oldest) break;
-      this.refs.delete(oldest[0]);
-    }
-    return `/api/feed/media/${ref}`;
-  }
-
-  /** The MIME type a registered reference is expected to have (used for the response header before streaming). */
-  mimeOf(ref: string): string | null {
-    return this.refs.get(ref)?.mime ?? null;
-  }
-
   /**
-   * Streams a feed media file (video or poster) to the client through the browser. No cookies are sent; the signed CDN
-   * URL is the credential. The whole body is sent (no Range): Chrome plays a buffered progressive MP4, and seeking
-   * within the buffered part works.
+   * Downloads the next videos before they are asked for, so a swipe does not wait for TikTok. The page already knows
+   * their signed URLs (the item bundle) — nothing is guessed, and nothing is stored anywhere but memory.
    */
-  async streamMedia(ref: string, write: (chunk: Buffer) => Promise<void>): Promise<{ mime: string | null; size: number }> {
-    const entry = this.refs.get(ref);
-    if (!entry) throw Errors.notFound('Media');
-    const agent = await this.ensureAgent();
-    void agent;
+  private async warmAhead(agent: FeedAgent): Promise<void> {
+    const dl = this.downloader;
+    if (!dl) return;
+    try {
+      const queue = await agent.queue(PRELOAD_AHEAD + 1);
+      let warmed = 0;
+      for (const q of queue) {
+        if (warmed >= PRELOAD_AHEAD) break;
+        if (!q.playAddr || (this.lastId && q.id === this.lastId)) continue;
+        this.media.ref(q.playAddr);
+        this.media.prefetch(q.playAddr, dl);
+        if (q.cover) this.media.ref(q.cover);
+        warmed++;
+      }
+    } catch {
+      /* warming is best-effort: a failed prefetch must never break the feed */
+    }
+  }
+
+  /** The bytes behind a media reference (video or poster), from the cache or downloaded once. */
+  async mediaOf(ref: string): Promise<Fetched | null> {
+    if (!this.media.urlOf(ref)) return null;
+    const got = await this.ensureAgent();
+    void got;
     const dl = this.downloader;
     if (!dl) throw Errors.unavailable('The TikTok connection is not open.');
-    const out = await dl.fetch(entry.url, MEDIA_MAX, write);
-    if (out.status !== 'ok') {
-      if (out.status === 'too_large') throw new AppError(413, 'too_large', 'That video is larger than the media limit.');
-      if (out.status === 'http') throw new AppError(502, 'upstream', `TikTok answered ${out.code}.`);
-      throw new AppError(502, 'upstream', 'The video could not be read from TikTok.');
-    }
-    return { mime: pickMime(out.mime) ?? entry.mime, size: out.size };
+    return this.media.get(ref, dl);
   }
-}
 
-function pickMime(header: string | null): string | null {
-  const base = (header ?? '').split(';')[0]!.trim().toLowerCase();
-  if (/^(video\/(mp4|webm|quicktime)|image\/(jpeg|png|webp|avif|gif)|audio\/(mp4|mpeg|aac|ogg))$/.test(base)) return base;
-  return null;
+  /** True when the bytes are cached (the route answers instantly and can advertise a long cache). */
+  mediaCached(ref: string): boolean {
+    return this.media.cached(ref);
+  }
+
+  mediaStats(): { refs: number; cached: number; bytes: number; inflight: number } {
+    return this.media.stats();
+  }
 }
 
 function absolute(href: string, origin: string): string {
