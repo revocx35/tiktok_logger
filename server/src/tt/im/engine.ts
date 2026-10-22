@@ -399,7 +399,9 @@ export class ImEngine {
       }
       this.peopleAt = Date.now();
     });
-    await this.syncAvatars(10).catch((e: Error) => this.ctx.log.debug({ err: e.message }, 'avatar pass failed'));
+    const got = await this.syncAvatars(10).catch(() => 0);
+    // More pictures waiting: come back in two minutes instead of half an hour.
+    if (got >= 10) this.peopleAt = Date.now() - 28 * 60_000;
   }
 
   peopleAge(): number {
