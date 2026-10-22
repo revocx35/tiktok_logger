@@ -21,7 +21,7 @@
   --accent: #fe2c55;
   --accent-2: #25f4ee;
   --accent-text: #ffffff;
-  --brand: linear-gradient(45deg, #25f4ee 0%, #fe2c55 100%);
+  --brand: linear-gradient(45deg, #25f4ee 0%, #1e9bd7 32%, #e5399f 68%, #fe2c55 100%);
   --link: #b81d3f;
   --danger: #fe2c55;
   --danger-bg: #fdeaec;

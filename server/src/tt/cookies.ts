@@ -1,11 +1,12 @@
 import { AppError } from '../errors.js';
 
 /*
- * Logging in with the session of the owner's own browser. Instagram's login can keep asking the container's browser for
- * a captcha; then the owner logs in on their own computer and pastes that browser's Instagram cookies. Accepted:
+ * Logging in with the session of the owner's own browser. TikTok's login can keep asking the container's browser for a
+ * captcha or a code; then the owner logs in on their own computer and pastes that browser's TikTok cookies. Accepted:
  * DevTools "Copy as cURL" (bash: Chrome `-b '…'` or `-H 'cookie: …'`, Firefox `-H 'Cookie: …'`), a plain Cookie header
- * (`name=value; …`), or a cookie-editor JSON export (`[{name, value, domain}, …]`). Only Instagram's own cookie names
- * are kept. The values are credentials: never logged, never stored anywhere but the Chromium profile.
+ * (`name=value; …`), or a cookie-editor JSON export (`[{name, value, domain}, …]`). Only TikTok's own cookie names are
+ * kept, and a jar without the login cookie is rejected with a message that says so. The values are credentials: never
+ * logged, never stored anywhere but the Chromium profile.
  */
 
 export interface SessionCookie {
@@ -13,14 +14,42 @@ export interface SessionCookie {
   value: string;
 }
 
-/** Instagram's cookies worth carrying over: the session and the device ids it was created with. */
-const NAMES = new Set(['sessionid', 'ds_user_id', 'csrftoken', 'mid', 'ig_did', 'datr', 'rur', 'shbid', 'shbts', 'ig_nrcb', 'ps_l', 'ps_n', 'ig_direct_region_hint']);
+/**
+ * TikTok's cookies worth carrying over: the login session, the identifiers TikTok ties it to (device ids, CSRF, the
+ * signed web tokens) and the store/country hints. Anything else in the jar is dropped (theme, consent, experiments).
+ */
+const NAMES = new Set([
+  'sessionid',
+  'sessionid_ss',
+  'sid_tt',
+  'sid_guard',
+  'uid_tt',
+  'uid_tt_ss',
+  'webapp_uid',
+  'passport_csrf_token',
+  'passport_csrf_token_default',
+  'tt_csrf_token',
+  'ttwid',
+  'tt_chain_token',
+  'odin_tt',
+  'cmpl_token',
+  's_v_web_id',
+  'tt_webid',
+  'tt_webid_v2',
+  'msToken',
+  'store-idc',
+  'store-country-sign',
+]);
 export const SESSION_INPUT_MAX = 32_000;
 const VALUE = /^[!-:<-~]{1,1024}$/; // printable ASCII, no spaces, no ';'
 
 const invalid = (msg: string) => new AppError(400, 'invalid_cookies', msg);
 const NOTHING =
   'Paste the "Copy as cURL" command or the Cookie header of a request to www.tiktok.com from your browser (sent while logged in).';
+const LOGGED_OUT =
+  'That browser is not logged in to TikTok: the request carries no "sessionid" cookie. Log in at www.tiktok.com in the ' +
+  'same browser, open Messages (or any signed-in page), and copy a request from there — the homepage of a signed-out ' +
+  'browser only has guest cookies (ttwid, msToken, …).';
 
 /** Splits a shell command into words (bash quoting: '…', "…", $'…', backslashes, line continuations). */
 export function shellWords(input: string): string[] {
@@ -136,7 +165,7 @@ function fromJson(text: string): [string, string][] {
   return out;
 }
 
-/** The Instagram cookies in what the owner pasted. Errors carry generic texts (never a value). */
+/** The TikTok cookies in what the owner pasted. Errors carry generic texts (never a value). */
 export function parseSessionCookies(input: string): SessionCookie[] {
   const text = input.trim();
   if (!text || text.length > SESSION_INPUT_MAX) throw invalid(NOTHING);
@@ -147,9 +176,10 @@ export function parseSessionCookies(input: string): SessionCookie[] {
     if (!VALUE.test(value)) throw invalid(`The value of the "${name}" cookie is not valid. Copy it again.`);
     found.set(name, value);
   }
-  if (!found.size) throw invalid(NOTHING);
+  // Cookies arrived but none of them is a TikTok name: usually the wrong site's request was copied.
+  if (!found.size) throw invalid(pairs.length ? LOGGED_OUT : NOTHING);
   const session = found.get('sessionid') ?? found.get('sessionid_ss') ?? found.get('sid_tt');
-  if (!session || session.length < 16) throw invalid('The login cookie ("sessionid") is missing. Copy a request that was sent while logged in.');
+  if (!session || session.length < 16) throw invalid(LOGGED_OUT);
   // TikTok's sessionid is an opaque hash; the account ids ride in uid_tt/sid_guard ("<uid>…"). When both are present
   // they must belong to the same account, else the pasted cookies are a mix of two accounts.
   const uid = found.get('uid_tt') ?? found.get('uid_tt_ss') ?? found.get('webapp_uid') ?? null;
