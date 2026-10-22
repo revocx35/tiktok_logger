@@ -1,4 +1,6 @@
 import type { Page } from 'puppeteer';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 import type { DomRow, DomThread } from './mapper.js';
 import type { PageSnapshot, ThreadSnapshot } from './types.js';
 import { toMillis } from './types.js';
@@ -87,7 +89,14 @@ export const DEFAULT_SELECTORS: DomSelectors = {
     'textarea[placeholder]',
     'textarea',
   ],
-  sendButton: ['[data-e2e="message-send"]', '[data-e2e="send-button"]', 'button[aria-label*="Send" i]', '[class*="sendBtn"]', '[class*="Send"]'],
+  sendButton: [
+    '[data-e2e="dm-new-send-btn"]',
+    'svg[aria-label*="Send" i]',
+    '[data-e2e="message-send"]',
+    '[data-e2e="send-button"]',
+    'button[aria-label*="Send" i]',
+    '[class*="sendBtn"]',
+  ],
   fileInput: ['input[type="file"]'],
   deletedHint: [
     '[data-e2e="message-deleted"]',
@@ -483,7 +492,9 @@ const AGENT = String.raw`
     for (const sel of S.sendButton) {
       const btns = all(sel).filter(vis);
       if (btns.length) {
-        const b = btns[btns.length - 1];
+        const found = btns[btns.length - 1];
+        // The control is an <svg> icon in TikTok's own markup: tag whatever actually takes the click.
+        const b = found.closest('button, [role="button"]') || found.parentElement || found;
         for (const old of all('[data-ttl-send="1"]')) old.removeAttribute('data-ttl-send');
         b.setAttribute('data-ttl-send', '1');
         return { ok: true, via: 'button' };
@@ -785,23 +796,34 @@ export class DomAgent {
     return { ok: read.value.trim() === text.trim(), value: read.value };
   }
 
-  /** Clicks the send button, else presses Enter — both as real events. */
+  /**
+   * Sends what is in the composer: Enter first (TikTok sends on Enter, and this is a real key event), then TikTok's own
+   * send icon if the text is still there — the control is an <svg>, so a click on it may or may not be accepted.
+   * The composer is read back both times, so "sent" is only reported when the box is really empty.
+   */
   async send(): Promise<{ ok: boolean; via?: string; error?: string }> {
+    const left = async (): Promise<string> =>
+      (await this.call<{ value: string }>('composerText').catch(() => ({ value: '' }))).value.trim();
+    try {
+      await this.page.focus('[data-ttl-compose="1"]').catch(() => undefined);
+      await this.page.keyboard.press('Enter');
+    } catch {
+      return { ok: false, error: 'enter_failed' };
+    }
+    await sleep(700);
+    if (!(await left())) return { ok: true, via: 'enter' };
     const target = await this.call<{ ok: boolean; via?: string }>('sendTag').catch(() => ({ ok: true, via: 'enter' }));
     if (target.via === 'button') {
       const clicked = await this.page.click('[data-ttl-send="1"]').then(
         () => true,
         () => false,
       );
-      if (clicked) return { ok: true, via: 'button' };
+      if (clicked) {
+        await sleep(700);
+        if (!(await left())) return { ok: true, via: 'button' };
+      }
     }
-    try {
-      await this.page.focus('[data-ttl-compose="1"]').catch(() => undefined);
-      await this.page.keyboard.press('Enter');
-      return { ok: true, via: 'enter' };
-    } catch {
-      return { ok: false, error: 'enter_failed' };
-    }
+    return { ok: false, error: 'not_sent' };
   }
 
   /** Attaches a file through the page's own file input (base64, so nothing has to be shared on disk). */
