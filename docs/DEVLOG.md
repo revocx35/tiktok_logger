@@ -1,5 +1,35 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.11.0: shared posts go out as Video messages
+
+Owner: "can you try implement it", after asking whether the other side can see our share as a card at all.
+
+v1.9.0–1.9.5 built the card body field by field and TikTok still answered status 0 and stored nothing. The answer was
+in TikTok's **own web client**: its DM share dialog builds
+
+```js
+sendMessage({ convId, uid, relation,
+  type: m.Go.Video /* 8; Text = 7, Story = 1025 */,
+  content: { aweType: 800, itemId, uid, secUID, content_thumb: { url_list: [cover], uri: cover },
+             content_name, cover_url: { url_list: [cover], uri: cover }, cover_width, cover_height },
+  hasConversation })
+```
+
+and the receiving side renders a card from exactly that (`case s.Go.Video` → `content_name`, `content_thumb`,
+`itemId`).
+
+* **The envelope's field 6 is the message type**, and `buildSendRequest` hardcoded `7` (Text) for everything — a
+  "text message whose content is a card". The reference bridge corroborates the field: it sets `Reserved_6 = 1802`
+  together with `message_subtype = "private_image"` for a private image. Shares now use `MESSAGE_TYPE_VIDEO` (8);
+  text and replies stay 7.
+* The content body now matches the official one: `secUID` (camelCase, was `sec_uid`), the cover's `uri` **is the cover
+  URL** (was `''`), both covers carry `{uri, url_list}`, and the extra `content_title` is gone.
+* `confirmShare` and the link fallback stay exactly as they were: if TikTok still drops it, the canonical link goes out
+  instead and the log says so.
+
+Tests: `tt/im/proto.test.ts` pins the message type (8 for a share, 7 for text and replies) and the whole card body
+field for field; 232 server tests.
+
 ## 2026-10-22 — v1.10.1: the chat card served no bytes
 
 Found by running the deployed `dist/tt/items.js` against the live tab right after v1.10.0 shipped: the post resolved

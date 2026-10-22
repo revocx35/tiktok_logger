@@ -159,6 +159,10 @@ export interface SendReply {
   cursorUs?: string;
 }
 
+/** TikTok's IM message types (its own web bundle: `Text = 7`, `Video = 8`, `Story = 1025`). */
+export const MESSAGE_TYPE_TEXT = 7;
+export const MESSAGE_TYPE_VIDEO = 8;
+
 export interface SendArgs {
   convId: string;
   sourceId: string;
@@ -214,19 +218,35 @@ export interface ShareArgs {
   height?: number | null;
 }
 
-/** The content JSON of a message: text (optionally a reply) or a shared post. */
+/**
+ * A post's cover as TikTok's client sends it: `{uri, url_list}` where **`uri` is the cover URL itself** (not a storage
+ * key, and never empty — a body with `uri: ''` is accepted with status 0 and then dropped).
+ */
+function shareCover(url: string, uri?: string): { uri: string; url_list: string[] } {
+  return { uri: uri ?? url, url_list: [url] };
+}
+
+/**
+ * The content JSON of a message: text (optionally a reply) or a shared post.
+ *
+ * The share body is copied field for field from TikTok's own web client — its DM share dialog calls
+ * `sendMessage({type: Video, content: {aweType: 800, itemId, uid, secUID, content_thumb: {url_list, uri}, content_name,
+ * cover_url: {url_list, uri}, cover_width, cover_height}})`. The spelling matters: `secUID` is camelCase, there is no
+ * `content_title`, and both covers carry the URL as their `uri`. Our earlier body used `sec_uid`, an empty cover `uri`
+ * and an extra `content_title`, and TikTok stored nothing.
+ */
 export function sendContent(a: Pick<SendArgs, 'text' | 'reply' | 'share'>): string {
   if (a.share) {
-    const asObject = (c: ShareCover | null | undefined) => (c && c.urls.length ? { uri: c.uri ?? '', url_list: c.urls } : null);
-    const cover = asObject(a.share.cover);
+    const cover = a.share.cover?.urls[0] ?? a.share.thumb?.urls[0] ?? null;
+    const thumb = a.share.thumb?.urls[0] ?? cover;
     return JSON.stringify({
       aweType: 800,
-      uid: a.share.uid,
       itemId: a.share.itemId,
-      ...(a.share.secUid ? { sec_uid: a.share.secUid } : {}),
-      ...(cover ? { cover_url: cover, content_thumb: asObject(a.share.thumb) ?? cover } : {}),
+      uid: a.share.uid,
+      ...(a.share.secUid ? { secUID: a.share.secUid } : {}),
+      ...(thumb ? { content_thumb: shareCover(thumb, a.share.thumb?.uri) } : {}),
       ...(a.share.name ? { content_name: a.share.name } : {}),
-      ...(a.share.title ? { content_title: a.share.title } : {}),
+      ...(cover ? { cover_url: shareCover(cover, a.share.cover?.uri) } : {}),
       ...(a.share.width ? { cover_width: a.share.width } : {}),
       ...(a.share.height ? { cover_height: a.share.height } : {}),
     });
@@ -254,7 +274,11 @@ export function buildSendRequest(env: ImEnv, a: SendArgs): Buffer {
     if (a.reply.cursorUs) ref.u64(4, BigInt(a.reply.cursorUs));
     body.message(11, ref);
   }
-  body.u64(6, 7).string(7, 'deprecated').string(8, a.clientMessageId);
+  // Field 6 is the **message type**, not a reserved field: TikTok's enum is Text = 7, Video = 8, Story = 1025
+  // (private image is 1802 — the reference bridge sets it there together with `message_subtype`). Every message used to
+  // go out as Text, which is why a shared post was accepted with status 0 and then never stored: the envelope said
+  // "text", the content said "card".
+  body.u64(6, a.share ? MESSAGE_TYPE_VIDEO : MESSAGE_TYPE_TEXT).string(7, 'deprecated').string(8, a.clientMessageId);
   // The web client puts the ticket-guard entries right before browser_version.
   const meta = metadata(env, [
     ['tt-ticket-guard-public-key', a.publicKeyB64],

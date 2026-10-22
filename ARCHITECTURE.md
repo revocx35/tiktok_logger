@@ -176,7 +176,10 @@ called with `credentials:'include'` from the tab). When it answers, everything i
 * **sending** is `/v1/message/send` with a per-send DPoP proof (text, `aweType` 703 replies, `aweType` 800 shared-post
   cards), reactions are `/v1/message/set_property` (705/10008, `action_flag` 2 in a group); media uploads still go
   through the page; a card TikTok silently drops is detected by reading the conversation back and the link is sent
-  instead;
+  instead. **The envelope's field 6 is the message type** (Text 7, Video 8, Story 1025): a shared post must be sent as
+  **Video**, with the content JSON TikTok's own web client builds (`aweType` 800, `itemId`, `uid`, `secUID`,
+  `content_thumb`/`cover_url` as `{url_list, uri}` where `uri` is the cover URL). Sending that body as Text is accepted
+  with status 0 and never stored — the bug that kept a shared video from arriving as a card until v1.11.0;
 * **profiles** (`/tiktok/v1/im/user/profile/`) name chats and group senders and fill the avatars.
 
 When the probe fails (or the origin is the test double) the v1.0–v1.5 page path runs unchanged: poll the open

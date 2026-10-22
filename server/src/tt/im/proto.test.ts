@@ -387,7 +387,7 @@ describe('send content: replies and shared posts', () => {
     expect(num(ref, 4)).toBe('1792000000300000');
   });
 
-  it('sends a shared post as an aweType 800 card with the item and its author', () => {
+  it('sends a shared post as a Video message whose content is the aweType 800 card', () => {
     const body = buildSendRequest(env, {
       convId: CONV,
       sourceId: PEER,
@@ -401,25 +401,42 @@ describe('send content: replies and shared posts', () => {
         secUid: 'MS4wLj',
         name: 'someone',
         title: 'a video',
-        cover: { uri: 'tos-key', urls: ['https://p16.example.com/c.jpg'] },
-        thumb: { uri: 'tos-thumb', urls: ['https://p16.example.com/t.jpg'] },
+        cover: { urls: ['https://p16.example.com/c.jpg'] },
         width: 1080,
         height: 1920,
       },
     });
     const send = sub(sub(readFields(body), 8)!, 100)!;
+    // The envelope's message type is what TikTok stores the row as; 7 (Text) with a card body was dropped silently.
+    expect(num(send, 6)).toBe('8');
+    // Field for field what TikTok's own web client sends (its DM share dialog) — no content_title, `secUID` camelCase,
+    // and the cover's `uri` is the URL itself.
     expect(JSON.parse(str(send, 4))).toEqual({
       aweType: 800,
-      uid: '7412345678900000001',
       itemId: '7412345678901234567',
-      sec_uid: 'MS4wLj',
-      cover_url: { uri: 'tos-key', url_list: ['https://p16.example.com/c.jpg'] },
-      content_thumb: { uri: 'tos-thumb', url_list: ['https://p16.example.com/t.jpg'] },
+      uid: '7412345678900000001',
+      secUID: 'MS4wLj',
+      content_thumb: { uri: 'https://p16.example.com/c.jpg', url_list: ['https://p16.example.com/c.jpg'] },
       content_name: 'someone',
-      content_title: 'a video',
+      cover_url: { uri: 'https://p16.example.com/c.jpg', url_list: ['https://p16.example.com/c.jpg'] },
       cover_width: 1080,
       cover_height: 1920,
     });
+  });
+
+  it('keeps Text as the message type for text and replies', () => {
+    const text = buildSendRequest(env, { convId: CONV, sourceId: PEER, isGroup: false, text: 'hi', clientMessageId: 'c-3', publicKeyB64: 'pk' });
+    expect(num(sub(sub(readFields(text), 8)!, 100)!, 6)).toBe('7');
+    const reply = buildSendRequest(env, {
+      convId: CONV,
+      sourceId: PEER,
+      isGroup: false,
+      text: 'answering',
+      clientMessageId: 'c-4',
+      publicKeyB64: 'pk',
+      reply: { messageId: '7412345678901234567', contentJson: '{}', uid: PEER, secUid: 'MS4w' },
+    });
+    expect(num(sub(sub(readFields(reply), 8)!, 100)!, 6)).toBe('7');
   });
 
   it('keeps the quoted content when a reply has no text to quote', () => {
