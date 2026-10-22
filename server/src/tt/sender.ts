@@ -23,14 +23,14 @@ export class Sender implements TtSender {
     private readonly driver: ChatDriver,
   ) {}
 
-  async sendText(chatId: string, text: string, _quotedId: string | null): Promise<SendResult> {
+  async sendText(chatId: string, text: string, quotedId: string | null, quotedText?: string | null): Promise<SendResult> {
     const body = text.trim();
     if (!body) throw Errors.validation('The message is empty.');
     if (body.length > 2000) throw Errors.validation('TikTok messages are limited to 2000 characters.');
     const proto = this.driver.protocol();
     if (proto) {
       try {
-        const id = await proto.sendText(chatId, body);
+        const id = await proto.sendText(chatId, body, quotedId ? this.replyFor(quotedId, quotedText ?? null) : null);
         this.ctx.repo.audit('message_sent', null, 'text');
         return { id };
       } catch (e) {
@@ -49,6 +49,18 @@ export class Sender implements TtSender {
     const id = await this.confirm(chatId, (m) => m.fromMe && (m.text ?? '').trim() === body, before);
     this.ctx.repo.audit('message_sent', null, 'text');
     return { id };
+  }
+
+  /** The reply envelope for a quoted message: its text, its author's uid and secUid (what the quote renders from). */
+  private replyFor(quotedId: string, quotedText: string | null): { messageId: string; contentJson: string; uid: string; secUid: string } | null {
+    const row = this.ctx.repo.findMessage(quotedId);
+    if (!row || !/^\d{5,24}$/.test(row.id)) return null;
+    return {
+      messageId: row.id,
+      contentJson: JSON.stringify({ aweType: 0, text: quotedText ?? '' }),
+      uid: row.sender_id ?? '',
+      secUid: '',
+    };
   }
 
   async sendMedia(chatId: string, file: { data: Buffer; mime: string; filename: string | null }, kind: SendMediaKind, _quotedId: string | null): Promise<SendResult> {
@@ -105,8 +117,53 @@ export class Sender implements TtSender {
     return null;
   }
 
-  async react(): Promise<void> {
-    throw new AppError(400, 'not_supported', "tiktok_logger does not send reactions: TikTok's web client only offers them through a menu that changes constantly.");
+  /**
+   * Adds or takes back a reaction (empty [emoji] removes; [previous] is the emoji being taken back).
+   *
+   * Through TikTok's own IM protocol — `/v1/message/set_property` — which is what the app and the web client use; the
+   * page has no stable control for this.
+   */
+  async react(messageId: string, emoji: string, previous?: string | null): Promise<void> {
+    const take = emoji.trim();
+    if (take) {
+      if ([...take].length > 3) throw Errors.validation('A reaction is one emoji.');
+      if (take.length > 16) throw Errors.validation('A reaction is one emoji.');
+    }
+    const target = previous?.trim() ?? '';
+    if (!take && !target) throw Errors.validation('There is no reaction to take back.');
+    const proto = this.driver.protocol();
+    if (!proto) throw new AppError(503, 'unavailable', 'Reactions need the TikTok IM connection. Wait for the TikTok screen to reach "connected".');
+    const row = this.ctx.repo.findMessage(messageId);
+    if (!row) throw Errors.notFound('Message');
+    if (!row.from_me && !row.chat_id) throw Errors.validation('That message has no conversation.');
+    const remove = !take;
+    const emojiToSend = remove ? target : take;
+    try {
+      await proto.react(row.chat_id, row.id, emojiToSend, remove);
+    } catch (e) {
+      if (e instanceof ImSendError) throw new AppError(502, 'reaction', e.message);
+      throw e;
+    }
+    this.ctx.repo.audit(remove ? 'reaction_removed' : 'reaction_added', null, null);
+  }
+
+  /** Shares a TikTok post into a conversation as a card (the way TikTok's own share works). */
+  async sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string }): Promise<SendResult> {
+    if (!/^\d{6,24}$/.test(share.itemId)) throw Errors.validation('That is not a TikTok post.');
+    if (!/^\d{6,24}$/.test(share.uid)) throw Errors.validation('The post\'s author is unknown, so it cannot be shared as a card.');
+    const proto = this.driver.protocol();
+    if (!proto) {
+      // Without the protocol a card cannot be built: fall back to the link, which is still readable by the other side.
+      return this.sendText(chatId, `https://www.tiktok.com/@_/video/${share.itemId}`, null);
+    }
+    try {
+      const id = await proto.sendShare(chatId, share);
+      this.ctx.repo.audit('message_sent', null, 'share');
+      return { id };
+    } catch (e) {
+      if (e instanceof ImSendError) throw new AppError(502, 'send', e.message);
+      throw e;
+    }
   }
 
   async unsend(): Promise<void> {

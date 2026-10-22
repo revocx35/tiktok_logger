@@ -1,5 +1,32 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.9.0: reactions, replies and video cards through the IM protocol
+
+Owner: "add reactions support … look at TikTok's message UI and get feature parity … sending videos shows up as a link,
+not a TikTok video … use the new architecture, not the old page."
+
+The protocol envelope already understood these messages when *reading* (`aweType` 703 replies, 800 shared posts,
+reaction summaries in field 15); sending them needed the request shapes, taken from the reference implementation's
+captured traffic (`/root/ref/matrix-tiktok` on CT 105, `proto/tiktok/im/v1/im.proto`):
+
+* **Reactions** — `POST /v1/message/set_property`, envelope **705 / 10008**, payload 705 → `{body, "deprecated"}`,
+  body = conversation id, `action_flag` 1, source id, the message id, a fresh client uuid and one mutation
+  `{action: 0|1, "e:<emoji>", selfUserId}`. The same ticket-guard + DPoP headers as a send. The reaction is applied
+  locally at once (the UI answers immediately) and confirmed by the socket or the next catch-up.
+* **Replies** — the content becomes `{"aweType":703,"text":…}` and `SendMessageReplyAttachment` rides field 11:
+  `{referenced id, reference JSON, the same id, parent cursor}`. The reference JSON carries the quoted content plus
+  `refmsg_uid` / `refmsg_sec_uid`, which is what TikTok renders the quote from.
+* **Video cards** — the content becomes `{"aweType":800,"itemId":…,"uid":…,"sec_uid":…,"content_title":…,
+  "cover_url":…}`. The feed item list already carries `author.id` and `author.secUid`, so `FeedCatalog` keeps them and
+  `POST /api/feed/:id/share {chatId}` sends the card. The web's "Send" now uses that route instead of mailing the URL,
+  which is why a shared video showed up as a plain link.
+
+Remaining parity gaps, deliberately: media *uploads* still go through the page's file input (the protocol needs the
+private-image/VOD upload dance), unsend/edit are still reported `not_supported`, and typing indicators are not sent.
+
+Tests: 6 new in `im/proto.test.ts` (the reaction envelope and both mutations, reply content + field 11, the shared-post
+content, the empty-quote fallback); 211 server tests, 10 web.
+
 ## 2026-10-22 — v1.8.0: story logging (stories section)
 
 TikTok's stories are 24-hour posts; insta_logger logs Instagram's the same way, so this is the same shape: a periodic

@@ -104,6 +104,8 @@ export const INBOX_PATH = '/v2/message/get_by_user_init';
 export const HISTORY_PATH = '/v1/message/get_by_conversation';
 export const COMBO_PATH = '/v1/message/get_by_user_combo';
 export const SEND_PATH = '/v1/message/send';
+/** Reactions (a message "property"): the same envelope shape as a send, type 705 / sub 10008. */
+export const SET_PROPERTY_PATH = '/v1/message/set_property';
 export const MARK_READ_PATH = '/v3/conversation/mark_read';
 
 /** The conversation list. `kind` 10002 returns group chats, 10006 the one-to-one ones (the web client asks for both). */
@@ -145,6 +147,18 @@ export function buildHistoryRequest(env: ImEnv, convId: string, sourceId: string
   });
 }
 
+export interface SendReply {
+  /** TikTok's id of the message being answered. */
+  messageId: string;
+  /** The quoted message's own content JSON, re-sent inside the reference. */
+  contentJson: string;
+  /** The quoted author's uid and secUid (TikTok renders the quote from these). */
+  uid: string;
+  secUid: string;
+  /** The quoted message's cursor (µs), when it is known. */
+  cursorUs?: string;
+}
+
 export interface SendArgs {
   convId: string;
   sourceId: string;
@@ -152,6 +166,40 @@ export interface SendArgs {
   text: string;
   clientMessageId: string;
   publicKeyB64: string;
+  /** Answer to another message: aweType 703 plus the reply attachment (field 11). */
+  reply?: SendReply | null;
+  /** A shared TikTok post instead of text: the card TikTok shows for a video or photo post. */
+  share?: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string } | null;
+}
+
+/** The JSON blob TikTok puts in a reply's reference (refmsg_uid, refmsg_sec_uid, the quoted content). */
+export function replyReferenceJson(parentContentJson: string, refmsgUid: string, refmsgSecUid: string): string {
+  const inner = parentContentJson.trim() || '{"aweType":0,"text":""}';
+  return JSON.stringify({
+    content: inner,
+    refmsg_content: inner,
+    refmsg_sec_uid: refmsgSecUid,
+    refmsg_type: 7,
+    refmsg_uid: refmsgUid,
+    refmsg_sub_type: '',
+    refmsg_template_quote: '',
+  });
+}
+
+/** The content JSON of a message: text (optionally a reply) or a shared post. */
+export function sendContent(a: Pick<SendArgs, 'text' | 'reply' | 'share'>): string {
+  if (a.share) {
+    const share = {
+      aweType: 800,
+      itemId: a.share.itemId,
+      uid: a.share.uid,
+      ...(a.share.secUid ? { sec_uid: a.share.secUid } : {}),
+      ...(a.share.title ? { content_title: a.share.title } : {}),
+      ...(a.share.cover ? { cover_url: a.share.cover } : {}),
+    };
+    return JSON.stringify(share);
+  }
+  return JSON.stringify({ aweType: a.reply ? 703 : 0, text: a.text });
 }
 
 export function buildSendRequest(env: ImEnv, a: SendArgs): Buffer {
@@ -163,8 +211,17 @@ export function buildSendRequest(env: ImEnv, a: SendArgs): Buffer {
     .string(1, a.convId)
     .u64(2, a.isGroup ? 2 : 1)
     .u64(3, BigInt(a.sourceId || '0'))
-    .bytes(4, Buffer.from(JSON.stringify({ aweType: 0, text: a.text })));
+    .bytes(4, Buffer.from(sendContent(a)));
   for (const t of tags) body.message(5, t);
+  if (a.reply) {
+    // SendMessageReplyAttachment: 1 referenced id, 2 reference JSON, 3 the same id again, 4 parent cursor.
+    const ref = new PbWriter()
+      .u64(1, BigInt(a.reply.messageId))
+      .bytes(2, Buffer.from(replyReferenceJson(a.reply.contentJson, a.reply.uid, a.reply.secUid)))
+      .u64(3, BigInt(a.reply.messageId));
+    if (a.reply.cursorUs) ref.u64(4, BigInt(a.reply.cursorUs));
+    body.message(11, ref);
+  }
   body.u64(6, 7).string(7, 'deprecated').string(8, a.clientMessageId);
   // The web client puts the ticket-guard entries right before browser_version.
   const meta = metadata(env, [
@@ -175,6 +232,66 @@ export function buildSendRequest(env: ImEnv, a: SendArgs): Buffer {
     ['tt-ticket-guard-web-version', '1'],
   ]);
   return envelope({ type: 100, sub: a.isGroup ? 10014 : 10009, reserved6: a.isGroup ? 1 : 0, payloadField: 100, body, deviceId: env.deviceId, meta });
+}
+
+export interface ReactionArgs {
+  convId: string;
+  sourceId: string;
+  /** The message being reacted to (TikTok's server message id). */
+  messageId: string;
+  /** 'e:<emoji>' to add; the same with remove = true to take it back. */
+  emoji: string;
+  /** The owner's own uid — TikTok records who reacted. */
+  selfUserId: string;
+  isGroup: boolean;
+  clientMessageId: string;
+  publicKeyB64: string;
+}
+
+/**
+ * A reaction, as TikTok's client sends it: `/v1/message/set_property`, envelope type 705 / sub 10008, payload →
+ * 705 → { body, "deprecated" }, the body naming the conversation, the message and one mutation
+ * `{ action: 0|1, "e:<emoji>", selfUserId }`.
+ */
+export function buildReactionRequest(env: ImEnv, a: ReactionArgs): Buffer {
+  const mutation = new PbWriter().u64(1, 0).string(2, `e:${a.emoji}`).string(4, a.selfUserId);
+  const body = new PbWriter()
+    .string(1, a.convId)
+    .u64(2, 1)
+    .u64(3, BigInt(a.sourceId || '0'))
+    .u64(4, BigInt(a.messageId))
+    .string(5, a.clientMessageId)
+    .message(6, mutation);
+  const wrapper = new PbWriter().message(1, body).string(2, 'deprecated');
+  const meta = metadata(env, [
+    ['tt-ticket-guard-public-key', a.publicKeyB64],
+    ['tt-ticket-guard-client-data', ''],
+    ['tt-ticket-guard-version', '2'],
+    ['tt-ticket-guard-iteration-version', '0'],
+    ['tt-ticket-guard-web-version', '1'],
+  ]);
+  return envelope({ type: 705, sub: 10008, reserved6: a.isGroup ? 1 : 0, payloadField: 705, body: wrapper, deviceId: env.deviceId, meta });
+}
+
+/** Removes the owner's reaction: the same mutation with action 1. */
+export function buildUnreactionRequest(env: ImEnv, a: ReactionArgs): Buffer {
+  const mutation = new PbWriter().u64(1, 1).string(2, `e:${a.emoji}`).string(4, a.selfUserId);
+  const body = new PbWriter()
+    .string(1, a.convId)
+    .u64(2, 1)
+    .u64(3, BigInt(a.sourceId || '0'))
+    .u64(4, BigInt(a.messageId))
+    .string(5, a.clientMessageId)
+    .message(6, mutation);
+  const wrapper = new PbWriter().message(1, body).string(2, 'deprecated');
+  const meta = metadata(env, [
+    ['tt-ticket-guard-public-key', a.publicKeyB64],
+    ['tt-ticket-guard-client-data', ''],
+    ['tt-ticket-guard-version', '2'],
+    ['tt-ticket-guard-iteration-version', '0'],
+    ['tt-ticket-guard-web-version', '1'],
+  ]);
+  return envelope({ type: 705, sub: 10008, reserved6: a.isGroup ? 1 : 0, payloadField: 705, body: wrapper, deviceId: env.deviceId, meta });
 }
 
 export interface MarkReadArgs {

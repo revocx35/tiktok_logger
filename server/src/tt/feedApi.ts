@@ -193,6 +193,26 @@ export class ApiFeed implements TtFeed {
     return this.toItem(target);
   }
 
+  /**
+   * Shares the video into a chat as a card.
+   *
+   * The card needs the post id **and** its author's id/secUid, which is why this lives here: the item list carries them
+   * (`author.id`, `author.secUid`) and a plain text link does not render as a video on the other side.
+   */
+  async share(id: string, chatId: string): Promise<{ id: string }> {
+    const item = this.catalog.byIdLookup(id);
+    if (!item) throw Errors.conflict('That video is not in the feed any more. Swipe to it again.');
+    if (!item.authorId) throw new AppError(409, 'share', 'TikTok did not say who posted that video, so it cannot be shared as a card.');
+    const sent = await this.ctx.tt.sender.sendShare(chatId, {
+      itemId: item.id,
+      uid: item.authorId,
+      ...(item.authorSecUid ? { secUid: item.authorSecUid } : {}),
+      ...(item.desc ? { title: item.desc.slice(0, 120) } : {}),
+      ...(item.cover ? { cover: item.cover } : {}),
+    });
+    return { id: sent.id ?? '' };
+  }
+
   async like(id: string, want: boolean): Promise<{ liked: boolean }> {
     const c = this.catalog.byIdLookup(id);
     if (c && c.liked === want) return { liked: want };

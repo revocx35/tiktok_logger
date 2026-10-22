@@ -978,6 +978,7 @@ function routedFeed(api: () => ApiFeed | null, page: FeedService): TtFeed {
     goto: (id) => read((f) => f.goto(id)),
     step: (dir) => read((f) => f.step(dir)),
     like: (id, want) => pick().like(id, want),
+    share: (id, chatId) => pick().share(id, chatId),
     comments: (id) => read((f) => f.comments(id)),
     comment: (id, text) => pick().comment(id, text),
     closeComments: () => pick().closeComments(),

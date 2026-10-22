@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { FeedCommentPage, FeedItem } from '../../../shared/api.js';
 import type { AppContext } from '../context.js';
 import { Errors } from '../errors.js';
+import { CHAT_ID_PATTERN } from './ids.js';
 import { parseRange } from './media.js';
 
 /**
@@ -41,6 +42,13 @@ export function registerFeedRoutes(app: FastifyInstance, ctx: AppContext): void 
     const { id } = IdParam.parse(req.params);
     const { like } = z.object({ like: z.boolean() }).strict().parse(req.body);
     return ctx.tt.feed.like(id, like);
+  });
+
+  /** Share a video into a chat as a TikTok card. */
+  app.post('/api/feed/:id/share', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+    const { id } = IdParam.parse(req.params);
+    const { chatId } = z.object({ chatId: z.string().regex(CHAT_ID_PATTERN) }).strict().parse(req.body);
+    return ctx.tt.feed.share(id, chatId);
   });
 
   app.get('/api/feed/:id/comments', { config: BROWSING }, async (req): Promise<FeedCommentPage> => {

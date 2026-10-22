@@ -10,7 +10,9 @@ import {
   buildHistoryRequest,
   buildInboxRequest,
   buildMarkReadRequest,
+  buildReactionRequest,
   buildSendRequest,
+  buildUnreactionRequest,
   COMBO_PATH,
   HISTORY_PATH,
   IM_AID,
@@ -24,9 +26,11 @@ import {
   parseSocketFrame,
   parseStatus,
   SEND_PATH,
+  SET_PROPERTY_PATH,
   type ImConversation,
   type ImEvent,
   type ImMessage,
+  type SendReply,
 } from './proto.js';
 import { IM_ORIGIN, randomBogus, type ImTransport } from './transport.js';
 
@@ -560,7 +564,7 @@ export class ImEngine {
   }
 
   /** Sends a text message. Returns TikTok's id of it (already stored). */
-  async sendText(chatId: string, text: string): Promise<string> {
+  async sendText(chatId: string, text: string, reply?: SendReply | null): Promise<string> {
     return this.serial(async () => {
       const info = await this.infoFor(chatId);
       if (!info) throw new ImSendError('This conversation is not known to TikTok yet. Open it on the TikTok screen once.', false);
@@ -569,25 +573,158 @@ export class ImEngine {
       const keys = ticketGuard();
       const clientId = randomUUID();
       const url = `${IM_ORIGIN}${SEND_PATH}`;
-      const body = buildSendRequest(env, { convId: chatId, sourceId: info.sourceId, isGroup: info.type === 2, text, clientMessageId: clientId, publicKeyB64: keys.publicKeyB64 });
-      let reply;
-      try {
-        reply = await this.t.post(SEND_PATH, body, {
-          query: { aid: IM_AID, version_code: '1.0.0', app_name: 'tiktok_web', device_platform: 'web_pc', 'ztca-version': '1', 'ztca-dpop': keys.dpop('POST', url), msToken: env.msToken, 'X-Bogus': randomBogus() },
-          headers: { 'tt-ticket-guard-iteration-version': '0', 'tt-ticket-guard-public-key': keys.publicKeyB64, 'tt-ticket-guard-version': '2', 'tt-ticket-guard-web-version': '1' },
-        });
-      } catch (e) {
-        // The request may or may not have reached TikTok: do not retry through another path.
-        throw new ImSendError(`TikTok did not answer (${(e as Error).message})`, true);
-      }
-      if (reply.status !== 200) throw new ImSendError(`TikTok refused the message (HTTP ${reply.status}).`, false);
-      const sent = parseSend(reply.body);
-      if (sent.status !== '0' && sent.status !== '') throw new ImSendError(`TikTok refused the message (status ${sent.status}).`, false);
+      const body = buildSendRequest(env, { convId: chatId, sourceId: info.sourceId, isGroup: info.type === 2, text, clientMessageId: clientId, publicKeyB64: keys.publicKeyB64, reply: reply ?? null });
+      const sent = await this.postSend(url, body, env, keys);
       const id = sent.messageId && /^\d{5,24}$/.test(sent.messageId) ? sent.messageId : `srv:${createHash('sha256').update(clientId).digest('base64url').slice(0, 22)}`;
-      const msg: TtMessage = { id, threadId: chatId, senderId: me, fromMe: true, ts: Date.now(), type: 'text', text, source: 'sent' };
+      const msg: TtMessage = {
+        id,
+        threadId: chatId,
+        senderId: me,
+        fromMe: true,
+        ts: Date.now(),
+        type: reply ? 'text' : 'text',
+        text,
+        ...(reply ? { quotedId: reply.messageId } : {}),
+        source: 'sent',
+      };
       this.knownThread(chatId, me);
       return this.ingest.message(msg, 'sent') ?? id;
     });
+  }
+
+  /**
+   * Shares a TikTok post into a conversation as a **card** (what TikTok's own share does), not as a link in a text
+   * message: the content is an `aweType: 800` body carrying the item id and its author, which the app renders as a
+   * shared post and the other side sees like any shared video.
+   */
+  async sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string }): Promise<string> {
+    return this.serial(async () => {
+      const info = await this.infoFor(chatId);
+      if (!info) throw new ImSendError('This conversation is not known to TikTok yet. Open it on the TikTok screen once.', false);
+      const { env } = await this.t.env();
+      const me = await this.me();
+      const keys = ticketGuard();
+      const clientId = randomUUID();
+      const url = `${IM_ORIGIN}${SEND_PATH}`;
+      const body = buildSendRequest(env, {
+        convId: chatId,
+        sourceId: info.sourceId,
+        isGroup: info.type === 2,
+        text: '',
+        clientMessageId: clientId,
+        publicKeyB64: keys.publicKeyB64,
+        share,
+      });
+      const sent = await this.postSend(url, body, env, keys);
+      const id = sent.messageId && /^\d{5,24}$/.test(sent.messageId) ? sent.messageId : `srv:${createHash('sha256').update(clientId).digest('base64url').slice(0, 22)}`;
+      const msg: TtMessage = {
+        id,
+        threadId: chatId,
+        senderId: me,
+        fromMe: true,
+        ts: Date.now(),
+        type: 'shared_post',
+        text: share.title ?? null,
+        meta: { itemId: share.itemId, uid: share.uid, ...(share.cover ? { cover: share.cover } : {}) },
+        source: 'sent',
+      };
+      this.knownThread(chatId, me);
+      return this.ingest.message(msg, 'sent') ?? id;
+    });
+  }
+
+  /**
+   * Adds (or takes back) a reaction on a message: `/v1/message/set_property`, envelope 705 / 10008.
+   *
+   * The reaction is applied locally at once so the UI answers immediately; the socket or the next catch-up confirms it
+   * (and brings the other side's reactions).
+   */
+  async react(chatId: string, messageId: string, emoji: string, remove = false): Promise<void> {
+    await this.serial(async () => {
+      const info = await this.infoFor(chatId);
+      if (!info) throw new ImSendError('This conversation is not known to TikTok yet. Open it on the TikTok screen once.', false);
+      if (!/^\d{5,24}$/.test(messageId)) throw new ImSendError('Only messages TikTok itself numbered can be reacted to.', false);
+      const { env } = await this.t.env();
+      const me = await this.me();
+      const keys = ticketGuard();
+      const url = `${IM_ORIGIN}${SET_PROPERTY_PATH}`;
+      const args = {
+        convId: chatId,
+        sourceId: info.sourceId,
+        messageId,
+        emoji,
+        selfUserId: me,
+        isGroup: info.type === 2,
+        clientMessageId: randomUUID(),
+        publicKeyB64: keys.publicKeyB64,
+      };
+      const body = remove ? buildUnreactionRequest(env, args) : buildReactionRequest(env, args);
+      let reply;
+      try {
+        reply = await this.t.post(SET_PROPERTY_PATH, body, {
+          query: {
+            aid: IM_AID,
+            version_code: '1.0.0',
+            app_name: 'tiktok_web',
+            device_platform: 'web_pc',
+            'ztca-version': '1',
+            'ztca-dpop': keys.dpop('POST', url),
+            msToken: env.msToken,
+            'X-Bogus': randomBogus(),
+          },
+          headers: {
+            'tt-ticket-guard-iteration-version': '0',
+            'tt-ticket-guard-public-key': keys.publicKeyB64,
+            'tt-ticket-guard-version': '2',
+            'tt-ticket-guard-web-version': '1',
+          },
+        });
+      } catch (e) {
+        throw new ImSendError(`TikTok did not answer (${(e as Error).message})`, true);
+      }
+      if (reply.status !== 200) throw new ImSendError(`TikTok refused the reaction (HTTP ${reply.status}).`, false);
+      const status = parseStatus(reply.body);
+      if (status !== '0' && status !== '') throw new ImSendError(`TikTok refused the reaction (status ${status}).`, false);
+      this.ingest.reaction(messageId, { senderId: me, emoji, removed: remove, ts: Date.now() });
+      this.ctx.events.emit({ type: 'message_update', chatId, messageId, reason: 'reaction' });
+    });
+  }
+
+  /** The shared POST for /v1/message/send (text and shares): DPoP + ticket-guard, refusal mapped to an error. */
+  private async postSend(
+    url: string,
+    body: Buffer,
+    env: { msToken: string },
+    keys: { publicKeyB64: string; dpop: (m: string, u: string) => string },
+  ): Promise<{ status: string; messageId: string }> {
+    let reply;
+    try {
+      reply = await this.t.post(SEND_PATH, body, {
+        query: {
+          aid: IM_AID,
+          version_code: '1.0.0',
+          app_name: 'tiktok_web',
+          device_platform: 'web_pc',
+          'ztca-version': '1',
+          'ztca-dpop': keys.dpop('POST', url),
+          msToken: env.msToken,
+          'X-Bogus': randomBogus(),
+        },
+        headers: {
+          'tt-ticket-guard-iteration-version': '0',
+          'tt-ticket-guard-public-key': keys.publicKeyB64,
+          'tt-ticket-guard-version': '2',
+          'tt-ticket-guard-web-version': '1',
+        },
+      });
+    } catch (e) {
+      // The request may or may not have reached TikTok: do not retry through another path.
+      throw new ImSendError(`TikTok did not answer (${(e as Error).message})`, true);
+    }
+    if (reply.status !== 200) throw new ImSendError(`TikTok refused the message (HTTP ${reply.status}).`, false);
+    const sent = parseSend(reply.body);
+    if (sent.status !== '0' && sent.status !== '') throw new ImSendError(`TikTok refused the message (status ${sent.status}).`, false);
+    return sent;
   }
 
   /** Marks a conversation read up to its newest message (what opening it in the page would do). */

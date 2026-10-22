@@ -157,6 +157,8 @@ export const api = {
   /** The user swiped to a video: move the remote page there and get a fresh window. */
   feedGoto: (id: string) => request<{ items: FeedItem[]; current: string | null }>('POST', '/api/feed/goto', { id }),
   feedLike: (id: string, like: boolean) => request<{ liked: boolean }>('POST', `/api/feed/${enc(id)}/like`, { like }),
+  /** Shares a feed video into a chat as a TikTok card. */
+  feedShare: (id: string, chatId: string) => request<{ id: string }>('POST', `/api/feed/${enc(id)}/share`, { chatId }),
   feedComments: (id: string) => request<FeedCommentPage>('GET', `/api/feed/${enc(id)}/comments`),
   feedComment: (id: string, text: string) => request<FeedCommentPage>('POST', `/api/feed/${enc(id)}/comment`, { text }),
   feedCloseComments: () => request<{ ok: true }>('POST', '/api/feed/comments/close'),

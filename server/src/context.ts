@@ -11,7 +11,9 @@ import type { SettingsStore } from './settings.js';
 
 /** Sending as the logged-in account (throws AppError: unavailable when TikTok is not connected). */
 export interface TtSender {
-  sendText(chatId: string, text: string, quotedId: string | null): Promise<SendResult>;
+  sendText(chatId: string, text: string, quotedId: string | null, quotedText?: string | null): Promise<SendResult>;
+  /** Shares a TikTok post into a conversation as a card (not a link). */
+  sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string }): Promise<SendResult>;
   sendMedia(chatId: string, file: { data: Buffer; mime: string; filename: string | null }, kind: SendMediaKind, quotedId: string | null): Promise<SendResult>;
   /** An empty emoji removes the owner's reaction ([previous]: the emoji being removed, TikTok needs it). */
   react(messageId: string, emoji: string, previous?: string | null): Promise<void>;
@@ -29,6 +31,8 @@ export interface TtFeed {
   /** Moves the remote page to a video the client swiped to. */
   goto(id: string): Promise<{ items: FeedItem[]; current: string | null }>;
   step(dir: 'next' | 'prev'): Promise<FeedItem>;
+  /** Sends a feed video into a conversation as a TikTok card (what TikTok's own share does). */
+  share(id: string, chatId: string): Promise<{ id: string }>;
   like(id: string, want: boolean): Promise<{ liked: boolean }>;
   comments(id: string): Promise<FeedComment[]>;
   comment(id: string, text: string): Promise<FeedComment[]>;
@@ -140,6 +144,7 @@ export class NullTt implements TtController {
     window: async () => ({ items: [], current: null }),
     goto: notConnected,
     step: notConnected,
+    share: notConnected,
     like: notConnected,
     comments: notConnected,
     comment: notConnected,
@@ -156,6 +161,7 @@ export class NullTt implements TtController {
   };
   readonly sender: TtSender = {
     sendText: notConnected,
+    sendShare: notConnected,
     sendMedia: notConnected,
     react: notConnected,
     unsend: notConnected,

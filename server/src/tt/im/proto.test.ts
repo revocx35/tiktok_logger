@@ -5,7 +5,11 @@ import {
   buildComboRequest,
   buildHistoryRequest,
   buildInboxRequest,
+  buildReactionRequest,
   buildSendRequest,
+  buildUnreactionRequest,
+  replyReferenceJson,
+  sendContent,
   parseCombo,
   parseContent,
   parseHistory,
@@ -309,5 +313,96 @@ describe('media rows', () => {
     const h = parseHistory(new PbWriter().u64(1, 0).message(6, new PbWriter().message(301, new PbWriter().message(1, r))).build());
     expect(h.messages[0]!.media).toMatchObject({ kind: 'sticker', url: 'https://p.example/s.webp', width: 200 });
     expect(toTtMessage(h.messages[0]!, ME)).toMatchObject({ type: 'sticker' });
+  });
+});
+
+describe('reactions (set_property, 705/10008)', () => {
+  const args = {
+    convId: CONV,
+    sourceId: PEER,
+    messageId: '7412345678901234567',
+    emoji: '❤️',
+    selfUserId: ME,
+    isGroup: false,
+    clientMessageId: '11111111-2222-3333-4444-555555555555',
+    publicKeyB64: 'pk',
+  };
+
+  it('builds an add-reaction envelope TikTok can read', () => {
+    const fields = readFields(buildReactionRequest(env, args));
+    expect(num(fields, 1)).toBe('705');
+    expect(num(fields, 2)).toBe('10008');
+    const wrapper = sub(sub(fields, 8)!, 705)!;
+    expect(str(wrapper, 2)).toBe('deprecated');
+    const body = sub(wrapper, 1)!;
+    expect(str(body, 1)).toBe(CONV);
+    expect(num(body, 2)).toBe('1');
+    expect(num(body, 3)).toBe(PEER);
+    expect(num(body, 4)).toBe('7412345678901234567');
+    expect(str(body, 5)).toBe(args.clientMessageId);
+    const mutation = sub(body, 6)!;
+    expect(num(mutation, 1)).toBe('0'); // 0 = add
+    expect(str(mutation, 2)).toBe('e:❤️');
+    expect(str(mutation, 4)).toBe(ME);
+    // The ticket guard travels with the request, like a send.
+    const meta = subs(fields, 15).map((kv) => str(kv, 1));
+    expect(meta).toContain('tt-ticket-guard-public-key');
+  });
+
+  it('builds a remove-reaction envelope with action 1', () => {
+    const body = sub(sub(sub(readFields(buildUnreactionRequest(env, args)), 8)!, 705)!, 1)!;
+    expect(num(sub(body, 6)!, 1)).toBe('1'); // 1 = remove
+  });
+});
+
+describe('send content: replies and shared posts', () => {
+  it('sends plain text as aweType 0', () => {
+    expect(JSON.parse(sendContent({ text: 'hi', reply: null, share: null }))).toEqual({ aweType: 0, text: 'hi' });
+  });
+
+  it('sends a reply as aweType 703 and attaches the reference at field 11', () => {
+    const body = buildSendRequest(env, {
+      convId: CONV,
+      sourceId: PEER,
+      isGroup: false,
+      text: 'answering',
+      clientMessageId: 'c-1',
+      publicKeyB64: 'pk',
+      reply: { messageId: '7412345678901234567', contentJson: '{"aweType":0,"text":"quoted"}', uid: PEER, secUid: 'MS4w', cursorUs: '1792000000300000' },
+    });
+    const send = sub(sub(readFields(body), 8)!, 100)!;
+    expect(JSON.parse(str(send, 4))).toEqual({ aweType: 703, text: 'answering' });
+    const ref = sub(send, 11)!;
+    expect(num(ref, 1)).toBe('7412345678901234567');
+    const json = JSON.parse(Buffer.from(str(ref, 2) ?? '', 'utf8').toString());
+    expect(json).toMatchObject({ refmsg_uid: PEER, refmsg_sec_uid: 'MS4w', refmsg_type: 7 });
+    expect(json.content).toBe('{"aweType":0,"text":"quoted"}');
+    expect(num(ref, 4)).toBe('1792000000300000');
+  });
+
+  it('sends a shared post as an aweType 800 card with the item and its author', () => {
+    const body = buildSendRequest(env, {
+      convId: CONV,
+      sourceId: PEER,
+      isGroup: false,
+      text: '',
+      clientMessageId: 'c-2',
+      publicKeyB64: 'pk',
+      share: { itemId: '7412345678901234567', uid: '7412345678900000001', secUid: 'MS4wLj', title: 'a video', cover: 'https://p16.example.com/c.jpg' },
+    });
+    const send = sub(sub(readFields(body), 8)!, 100)!;
+    expect(JSON.parse(str(send, 4))).toEqual({
+      aweType: 800,
+      itemId: '7412345678901234567',
+      uid: '7412345678900000001',
+      sec_uid: 'MS4wLj',
+      content_title: 'a video',
+      cover_url: 'https://p16.example.com/c.jpg',
+    });
+  });
+
+  it('keeps the quoted content when a reply has no text to quote', () => {
+    const json = JSON.parse(replyReferenceJson('', PEER, 'sec'));
+    expect(json.content).toBe('{"aweType":0,"text":""}');
   });
 });

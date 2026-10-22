@@ -45,6 +45,9 @@ export interface CatalogItem {
   authorName: string | null;
   avatar: string | null;
   liked: boolean | null;
+  /** The author's numeric id and secUid: a shared post card needs both to render on the other side. */
+  authorId: string | null;
+  authorSecUid: string | null;
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -112,7 +115,7 @@ export class FeedCatalog {
       const it = raw as {
         id?: unknown;
         desc?: unknown;
-        author?: { uniqueId?: unknown; nickname?: unknown; avatarThumb?: unknown; avatarMedium?: unknown };
+        author?: { uniqueId?: unknown; nickname?: unknown; avatarThumb?: unknown; avatarMedium?: unknown; id?: unknown; secUid?: unknown };
         digged?: unknown;
         video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown };
         music?: { title?: unknown };
@@ -134,6 +137,8 @@ export class FeedCatalog {
         shares: num(it.stats?.shareCount),
         plays: num(it.stats?.playCount),
         authorName: typeof it.author?.nickname === 'string' ? it.author.nickname : null,
+        authorId: typeof it.author?.id === 'string' ? it.author.id : null,
+        authorSecUid: typeof it.author?.secUid === 'string' ? it.author.secUid : null,
         avatar: str(it.author?.avatarThumb) ?? str(it.author?.avatarMedium),
         liked: typeof it.digged === 'boolean' ? it.digged : null,
       };
@@ -509,6 +514,20 @@ export class FeedService {
       await sleep(450);
     }
     throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
+  }
+
+  /** Shares the video into a chat as a card (the catalogue holds the author ids a card needs). */
+  async share(id: string, chatId: string): Promise<{ id: string }> {
+    const item = this.catalog?.byIdLookup(id) ?? null;
+    if (!item?.authorId) throw new AppError(409, 'share', 'TikTok did not say who posted that video, so it cannot be shared as a card.');
+    const sent = await this.ctx.tt.sender.sendShare(chatId, {
+      itemId: item.id,
+      uid: item.authorId,
+      ...(item.authorSecUid ? { secUid: item.authorSecUid } : {}),
+      ...(item.desc ? { title: item.desc.slice(0, 120) } : {}),
+      ...(item.cover ? { cover: item.cover } : {}),
+    });
+    return { id: sent.id ?? '' };
   }
 
   /* ------------------------------------------------------------------ like */
