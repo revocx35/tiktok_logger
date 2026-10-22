@@ -58,6 +58,11 @@ export class FeedCatalog {
     return this.byId.size;
   }
 
+  /** The captured item for a video id (the feed's DOM knows the id, not the URL). */
+  byIdLookup(id: string | null): CatalogItem | null {
+    return id ? this.byId.get(id) ?? null : null;
+  }
+
   ingest(body: Buffer | string): void {
     let data: unknown;
     try {
@@ -252,7 +257,7 @@ export class FeedService {
 
   private toItem(raw: RawFeedItem): FeedItem {
     // The DOM cannot name the item (no link) and cannot give its video (MSE `blob:` source); the captured item list can.
-    const known = this.catalog?.find(raw.author.username, raw.caption) ?? null;
+    const known = this.catalog?.byIdLookup(raw.id) ?? this.catalog?.find(raw.author.username, raw.caption) ?? null;
     const id = raw.id ?? known?.id ?? syntheticItemId(raw);
     const domSrc = raw.video?.src && !raw.video.src.startsWith('blob:') ? raw.video.src : null;
     const src = domSrc ?? known?.playAddr ?? null;

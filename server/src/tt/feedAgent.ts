@@ -118,6 +118,10 @@ const AGENT = String.raw`
   };
 
   const idOf = (el) => {
+    // The item carries no link to itself, but its "more actions" button is keyed by the video id.
+    const keyed = el.querySelector('[data-more-menu-item-id]');
+    const keyedId = keyed && keyed.getAttribute('data-more-menu-item-id');
+    if (keyedId && /^\d{6,24}$/.test(keyedId)) return keyedId;
     const href = videoLink(el);
     const m = href ? /\/video\/(\d{6,24})/.exec(href) : null;
     if (m) return m[1];
@@ -141,7 +145,10 @@ const AGENT = String.raw`
     const el = currentEl();
     if (!el) return null;
     const video = (all('video', el).find(vis) || all('video').find(vis)) || null;
-    const authorEl = first(S.author, el)[0] || all('a[href^="/@"]').find(vis) || null;
+    // The author is the link around the author's avatar: the first link to a profile in the item can be an @mention in
+    // the caption (the caption comes first in the DOM), which would name the wrong person and break catalog matching.
+    const avatarEl = el.querySelector('[data-e2e="video-author-avatar"], [data-e2e="browse-avatar"]');
+    const authorEl = (avatarEl && avatarEl.closest('a[href^="/@"]')) || first(S.author, el)[0] || null;
     const href = authorEl ? authorEl.getAttribute('href') || '' : '';
     const username = (/^\/@([A-Za-z0-9_.]+)/.exec(href) || [])[1] || (authorEl ? txt(authorEl).replace(/^@/, '') : null);
     const captionEl = first(S.caption, el)[0] || null;

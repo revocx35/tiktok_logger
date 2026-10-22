@@ -55,6 +55,14 @@ describe('FeedCatalog', () => {
     expect(c.find('ali.veli', 'same')?.id).toBe('7412345678901234571');
   });
 
+  it('finds the item by the id the DOM carries (more-actions button)', () => {
+    const c = new FeedCatalog();
+    c.ingest(body([item('7672873021899574550', 'proudfenian', 'a caption')]));
+    expect(c.byIdLookup('7672873021899574550')?.playAddr).toBe('https://v16.tiktokcdn.com/7672873021899574550.mp4');
+    expect(c.byIdLookup('7000000000000000000')).toBeNull();
+    expect(c.byIdLookup(null)).toBeNull();
+  });
+
   it('survives junk: not JSON, no item list, ids that are not ids', () => {
     const c = new FeedCatalog();
     c.ingest(Buffer.from('not json'));
