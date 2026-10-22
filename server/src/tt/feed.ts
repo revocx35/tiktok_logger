@@ -3,7 +3,7 @@ import type { FeedComment, FeedItem } from '../../../shared/api.js';
 import type { AppContext } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import { BrowserDownloader } from './download.js';
-import { FeedMedia, type Fetched } from './feedMedia.js';
+import { FeedMedia, refOf, type Fetched } from './feedMedia.js';
 import { FeedAgent, mergeFeedSelectors, type RawFeedItem } from './feedAgent.js';
 
 /**
@@ -372,19 +372,29 @@ export class FeedService {
   private async warmAhead(agent: FeedAgent): Promise<void> {
     const dl = this.downloader;
     if (!dl) return;
-    try {
-      const queue = await agent.queue(PRELOAD_AHEAD + 1);
-      let warmed = 0;
-      for (const q of queue) {
-        if (warmed >= PRELOAD_AHEAD) break;
-        if (!q.playAddr || (this.lastId && q.id === this.lastId)) continue;
-        this.media.ref(q.playAddr);
-        this.media.prefetch(q.playAddr, dl);
-        if (q.cover) this.media.ref(q.cover);
-        warmed++;
+    let warmed = 0;
+    // Two passes: the page adds items to its bundle as it loads, so a second look a moment later usually finds the
+    // videos the first pass could not name yet.
+    for (let pass = 0; pass < 2 && warmed < PRELOAD_AHEAD; pass++) {
+      if (pass) await sleep(1200);
+      try {
+        const queue = await agent.queue(PRELOAD_AHEAD + 4);
+        for (const q of queue) {
+          if (warmed >= PRELOAD_AHEAD) break;
+          // The document's own bundle covers the items it shipped with; the captured item list fills in the rest.
+          const known = q.playAddr ? null : this.catalog?.byIdLookup(q.id) ?? null;
+          const url = q.playAddr ?? known?.playAddr ?? null;
+          if (!url || (this.lastId && q.id === this.lastId)) continue;
+          if (this.media.cached(refOf(url))) continue;
+          this.media.ref(url);
+          this.media.prefetch(url, dl);
+          const cover = q.cover ?? known?.cover ?? null;
+          if (cover) this.media.ref(cover);
+          warmed++;
+        }
+      } catch {
+        return; // warming is best-effort: it must never break the feed
       }
-    } catch {
-      /* warming is best-effort: a failed prefetch must never break the feed */
     }
   }
 
