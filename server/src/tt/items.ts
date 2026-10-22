@@ -1,7 +1,7 @@
 import type { TtItem } from '../../../shared/api.js';
 import type { AppContext } from '../context.js';
 import { AppError, Errors } from '../errors.js';
-import { FeedMedia, type Downloader, type Fetched } from './feedMedia.js';
+import { FeedMedia, refOf, type Downloader, type Fetched } from './feedMedia.js';
 import { WebApiError, type WebApi } from './web/api.js';
 
 /**
@@ -135,13 +135,27 @@ export class TtItems {
     if (!parsed) throw Errors.notFound('That post is gone from TikTok (deleted, private or region-locked).');
     const item: ResolvedItem = {
       ...parsed,
-      coverRef: parsed.cover ? this.media.ref(parsed.cover) : null,
-      videoRef: parsed.playAddr ? this.media.ref(parsed.playAddr) : null,
+      coverRef: this.register(parsed.cover),
+      videoRef: this.register(parsed.playAddr),
       at: Date.now(),
     };
     this.cache.set(id, item);
     if (this.cache.size > MAX_ITEMS) this.cache.delete(this.cache.keys().next().value as string);
     return item;
+  }
+
+  /**
+   * Registers a CDN link with the byte cache and returns the **cache id**.
+   *
+   * `FeedMedia.ref()` answers the `/api/feed/media/<id>` path, but `FeedMedia.get()`/`cached()` are keyed by
+   * `refOf(url)` — handing the path back made every fetch a miss, which is how the deployed card resolved a post and
+   * then served no bytes (found by running this module against the live tab, not by the unit tests, which had a null
+   * downloader).
+   */
+  private register(url: string | null): string | null {
+    if (!url) return null;
+    this.media.ref(url);
+    return refOf(url);
   }
 
   /** The video or cover bytes (downloaded once through the page, then served from memory). */

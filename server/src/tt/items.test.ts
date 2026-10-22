@@ -109,6 +109,30 @@ describe('TtItems', () => {
     expect(calls).toEqual(['/api/item/detail/?itemId=7699491139375615253']);
   });
 
+  it('serves the bytes: registers the CDN link under the cache id the fetcher is keyed by', async () => {
+    // A page downloader stand-in: answers with a tiny "mp4" and records the URL it was asked for.
+    const asked: string[] = [];
+    const dl = {
+      fetch: async (url: string, _max: number, sink: (c: Buffer) => Promise<void>) => {
+        asked.push(url);
+        await sink(Buffer.from('\u0000\u0000\u0000\u0018ftypisom'));
+        return { status: 'ok', mime: 'video/mp4', size: 12 } as const;
+      },
+    };
+    const items = new TtItems(ctx, { api: () => fakeApi(() => LIVE).api, downloader: () => dl });
+
+    const video = await items.bytes('7699491139375615253', 'video');
+    expect(video).not.toBeNull();
+    expect(video!.mime).toBe('video/mp4');
+    expect(video!.data.subarray(4, 8).toString()).toBe('ftyp');
+    expect(asked).toEqual(['https://v16-webapp-prime.tiktok.com/video/tos/alisg/abc/?a=1988&mime_type=video_mp4']);
+    expect(items.cached('7699491139375615253', 'video')).toBe(true);
+
+    // Second read is a cache hit, not a second download.
+    await items.bytes('7699491139375615253', 'video');
+    expect(asked).toHaveLength(1);
+  });
+
   it('reports a deleted or private post as not found, and a photo post as having no video', async () => {
     const items = new TtItems(ctx, { api: () => fakeApi(() => GONE).api, downloader: () => null });
     await expect(items.lookup('7000000000000000000')).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });

@@ -1,5 +1,22 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.10.1: the chat card served no bytes
+
+Found by running the deployed `dist/tt/items.js` against the live tab right after v1.10.0 shipped: the post resolved
+correctly (desc, author, stats, duration, no CDN link in the DTO, a bogus id answered 404) but `bytes()` returned
+`null` for both the video and the cover.
+
+`FeedMedia.ref(url)` answers the **route path** `/api/feed/media/<id>`, while `get()`/`cached()` are keyed by
+`refOf(url)` — so a ref stored from `ref()` never hit the byte cache and every fetch was a miss. `TtItems` now
+registers the link and keeps `refOf(url)` as the id (`register()`).
+
+The unit tests missed it because their downloader was `null`, so nothing ever walked the cache. `tt/items.test.ts` now
+has a case with a page-downloader stand-in: it asserts the bytes come back (an `ftyp` at offset 4), that the CDN URL
+was asked for exactly once and that a second read is a cache hit — reverting `register()` makes it fail.
+
+Lesson for the next endpoint that reuses `FeedMedia`: the path it returns is for the *feed's* route; the cache id is
+`refOf(url)`.
+
 ## 2026-10-22 — v1.10.0: a shared video is a video, not a link
 
 Owner: "when i send a video it only is a link … also when i open a chat the video links are only shown as links i dont
