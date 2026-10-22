@@ -116,12 +116,13 @@ export class ChromiumLink {
     return body.password;
   }
 
-  /** A raw byte tunnel to this tenant's x11vnc (HTTP Upgrade: igl-tunnel; the manager checks the token). */
+  /** A raw byte tunnel to this tenant's x11vnc (HTTP Upgrade: ttl-tunnel — chromium/manager/server.go checks this
+   *  exact value *and* the token; the two must stay in sync, and the Go tests pin the same string). */
   openVncTunnel(timeoutMs = 5000): Promise<net.Socket> {
     return new Promise((resolve, reject) => {
       const u = new URL(this.path('/vnc'));
       const lib = u.protocol === 'https:' ? https : http;
-      const req = lib.request(u, { headers: { ...this.headers, connection: 'Upgrade', upgrade: 'igl-tunnel' }, timeout: timeoutMs });
+      const req = lib.request(u, { headers: { ...this.headers, connection: 'Upgrade', upgrade: 'ttl-tunnel' }, timeout: timeoutMs });
       req.on('upgrade', (_res, socket, head) => {
         socket.setTimeout(0);
         if (head.length) socket.unshift(head);
