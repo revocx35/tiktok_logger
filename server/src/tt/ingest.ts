@@ -23,6 +23,8 @@ export interface MediaSource {
   kind: TtMedia['kind'];
   mime?: string | null;
   fallbackUrl?: string | null;
+  /** hex AES-256-GCM key: the CDN serves private photos encrypted */
+  decryptKey?: string | null;
 }
 
 /** Signed CDN links of the messages we are about to store. Memory only — they are credentials to private files. */
@@ -174,7 +176,12 @@ export class Ingest {
 
     let existing = this.ctx.repo.findMessage(id);
     if (!existing) existing = this.ctx.repo.messageByDedupe(m.threadId, key);
-    if (!existing) existing = this.ctx.repo.findSyntheticTwin(m.threadId, m.ts, m.fromMe);
+    // The page showed one time per group of messages, so a row it stored can be a few minutes off the exact time that
+    // the protocol gives. The same text from the same side within ±6 minutes is the same message: adopt that row.
+    if (!existing && realId && source !== 'dom') existing = this.adoptable(m);
+    // A lone page-read row of the same side right next to it (text cannot be compared: it is encrypted) is the same
+    // message; the window is tight for text so two different messages are not merged.
+    if (!existing) existing = this.ctx.repo.findSyntheticTwin(m.threadId, m.ts, m.fromMe, m.text ? 90_000 : 5 * 60_000);
 
     if (existing) {
       const patch: Partial<MessageRow> = { updated_at: now };
@@ -185,6 +192,12 @@ export class Ingest {
         patch.source = source;
         patch.dedupe_key = key;
         if (realId && existing.id !== realId && !existing.alt_id) patch.alt_id = realId;
+      }
+      // Seen again by the server: whatever the page-reading fallback once judged "missing" was a misjudgement. (An unsend
+      // TikTok announces is `sender` and stays.)
+      if (source !== 'dom' && existing.deleted_by === 'missing') {
+        patch.deleted_at = null;
+        patch.deleted_by = null;
       }
       if (m.text && !existing.body_enc) patch.body_enc = w.encrypt(...F.body(existing.id), m.text);
       if (m.edited) patch.edited_at = now;
@@ -247,6 +260,16 @@ export class Ingest {
     return id;
   }
 
+  /** A synthetic (page-read) row that is the same message as [m], found by shifting the minute of its content key. */
+  private adoptable(m: TtMessage): MessageRow | undefined {
+    for (let d = -6; d <= 6; d++) {
+      if (d === 0) continue;
+      const row = this.ctx.repo.messageByDedupe(m.threadId, contentKey({ ...m, ts: m.ts + d * 60_000 }));
+      if (row && isSyntheticId(row.id)) return row;
+    }
+    return undefined;
+  }
+
   private insertRow(a: {
     id: string;
     chatId: string;
@@ -307,7 +330,7 @@ export class Ingest {
   }
 
   private queueMedia(messageId: string, media: TtMedia, chatId: string, source: Source): void {
-    this.sources.set(messageId, { url: media.url, kind: media.kind, mime: media.mime ?? MEDIA_MIME[media.kind] ?? null });
+    this.sources.set(messageId, { url: media.url, kind: media.kind, mime: media.mime ?? MEDIA_MIME[media.kind] ?? null, decryptKey: media.decryptKey ?? null });
     this.media.enqueue(messageId, source === 'history' ? 'history' : 'live');
     this.events.emit({ type: 'chat_update', chatId });
   }

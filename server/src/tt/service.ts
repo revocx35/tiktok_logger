@@ -15,6 +15,8 @@ import { Ingest, MediaSources } from './ingest.js';
 import { lookAtTab, nextLoginStep, setSessionCookies, steerTab } from './loginwatch.js';
 import { MediaQueue } from './media.js';
 import { domRowToMessage, domThreadToThread, mapMessage, mapThread, mapUser, walkCandidates } from './mapper.js';
+import { ImEngine } from './im/engine.js';
+import { ImTransport } from './im/transport.js';
 import { Sender } from './sender.js';
 import { Sync } from './sync.js';
 import { isOpaqueId, type TtMessage, type TtThread, type TtUser, type ThreadSnapshot } from './types.js';
@@ -36,6 +38,8 @@ export class TtService implements TtController, ChatDriver {
   private watcher: Watcher | null = null;
   private agentRef: DomAgent | null = null;
   private downloaderRef: BrowserDownloader | null = null;
+  /** The IM protocol engine (null → the page-driving fallback is in use). */
+  private engineRef: ImEngine | null = null;
   private state: TtState = 'idle';
   private detail: string | undefined;
   private since = Date.now();
@@ -329,13 +333,13 @@ export class TtService implements TtController, ChatDriver {
     const agent = new DomAgent(page, this.selectors);
     await agent.install();
     this.agentRef = agent;
-    const downloader = new BrowserDownloader(page);
+    const downloader = new BrowserDownloader(page, true, origin === 'https://www.tiktok.com' ? undefined : origin);
     await downloader.attach().catch(() => undefined);
     this.downloaderRef = downloader;
     this.watcher = new Watcher(
       page,
       {
-        frame: (f) => this.onFrame(f.bytes),
+        frame: (f) => this.onFrame(f.bytes, f.dir),
         body: (b) => this.onBody(b.body, b.contentType),
         // The For You page's own JSON: item ids and the signed video URLs the DOM does not expose.
         feed: (b) => this.feedCatalog.ingest(b.body),
@@ -367,9 +371,25 @@ export class TtService implements TtController, ChatDriver {
     this.syncInfo = { phase: 'history', chatsDone: 0, chatsTotal: 0 };
     this.media.resume();
     this.media.restorePending();
+    const engine = await this.startEngine(page);
+    if (engine) {
+      try {
+        await engine.initialImport((done, total) => {
+          this.syncInfo = { phase: 'history', chatsDone: done, chatsTotal: total };
+          this.ctx.events.emit({ type: 'sync_progress', sync: this.syncInfo });
+        });
+        this.ctx.repo.setState('initial_sync_done', '1');
+      } catch (err) {
+        this.ctx.log.warn({ err: (err as Error).message }, 'initial import failed (continuing)');
+      }
+      this.syncInfo = null;
+      this.setState('ready');
+      this.startProtocolLoops(gen, engine);
+      return;
+    }
     try {
       this.sync.useAgent(agent);
-    await this.sync.initial();
+      await this.sync.initial();
       this.ctx.repo.setState('initial_sync_done', '1');
     } catch (err) {
       this.ctx.log.warn({ err: (err as Error).message }, 'initial import failed (continuing)');
@@ -377,6 +397,85 @@ export class TtService implements TtController, ChatDriver {
     this.syncInfo = null;
     this.setState('ready');
     this.startLoops(gen);
+  }
+
+  /**
+   * Switches to the IM protocol when it answers in this tab (the normal case). Otherwise the page-driving path keeps
+   * the log going and the reason is logged.
+   */
+  private async startEngine(page: Page): Promise<ImEngine | null> {
+    // The protocol only exists on the real site (the test double has no IM API).
+    if (this.ctx.config.ttWebOrigin !== 'https://www.tiktok.com') return null;
+    const transport = new ImTransport({ evaluate: (fn, ...args) => page.evaluate(fn as never, ...(args as unknown as never[])) as never });
+    const engine = new ImEngine(this.ctx, this.ingest, transport, { activity: () => (this.lastEventAt = Date.now()) });
+    if (!(await engine.probe())) {
+      this.ctx.log.warn('TikTok IM protocol unavailable in this tab — using the page-driving fallback');
+      return null;
+    }
+    try {
+      const { uid } = await transport.env();
+      if (uid && this.ingest.me?.id !== uid) {
+        this.ingest.me = { id: uid, username: this.me?.username ?? null, name: this.me?.name ?? null };
+        this.ingest.upsertContact(this.ingest.me, true);
+        this.me = this.ingest.me;
+      }
+    } catch {
+      /* the page-reported id stays */
+    }
+    this.engineRef = engine;
+    this.ctx.log.info('TikTok IM protocol active');
+    return engine;
+  }
+
+  /** The protocol loops: a cheap catch-up every few seconds, the unsend check every `reconcileMinutes`. */
+  private startProtocolLoops(gen: number, engine: ImEngine): void {
+    this.stopLoops();
+    let failures = 0;
+    const poll = async () => {
+      if (gen !== this.gen || this.stopped) return;
+      try {
+        const page = this.page;
+        const kind = page ? classifyUrl(page.url(), this.ctx.config.ttWebOrigin) : 'blank';
+        if (kind === 'login' || kind === 'challenge') {
+          this.setState(kind === 'login' ? 'login' : 'challenge', 'TikTok is logged out. Log in on the TikTok screen.');
+        } else {
+          await engine.catchUp('live', 6);
+          failures = 0;
+          this.lastPollAt = Date.now();
+          if (this.state !== 'ready') this.setState('ready');
+        }
+      } catch (err) {
+        failures++;
+        this.ctx.log.debug({ err: (err as Error).message, failures }, 'catch-up failed');
+        // A page that was reloaded or navigated loses its device id for a moment: forget it and ask again.
+        if (failures === 3) void this.reloadTab();
+      }
+      if (gen !== this.gen || this.stopped) return;
+      this.pollTimer = setTimeout(() => void poll(), failures ? Math.min(30_000, 4000 * failures) : 5000);
+      this.pollTimer.unref();
+    };
+    this.pollTimer = setTimeout(() => void poll(), 3000);
+    this.pollTimer.unref();
+
+    const reconcile = async () => {
+      if (gen !== this.gen || this.stopped) return;
+      this.syncInfo = { phase: 'reconcile', chatsDone: 0, chatsTotal: 0 };
+      this.ctx.events.emit({ type: 'sync_progress', sync: this.syncInfo });
+      try {
+        await engine.reconcile(15);
+      } catch (err) {
+        this.ctx.log.warn({ err: (err as Error).message }, 'reconcile failed');
+      } finally {
+        this.syncInfo = null;
+        this.ctx.events.emit({ type: 'sync_progress', sync: null });
+      }
+      if (gen !== this.gen || this.stopped) return;
+      this.reconcileTimer = setTimeout(() => void reconcile(), this.ctx.settings.get().reconcileMinutes * 60_000);
+      this.reconcileTimer.unref();
+    };
+    this.reconcileTimer = setTimeout(() => void reconcile(), 60_000);
+    this.reconcileTimer.unref();
+    this.scheduleRefresh(gen);
   }
 
   private startLoops(gen: number): void {
@@ -437,6 +536,8 @@ export class TtService implements TtController, ChatDriver {
       await sleep(2500);
       await this.agentRef?.reset().catch(() => undefined);
       this.pendingReconcile = true;
+      // The reloaded document brings a fresh device id and token: the protocol side reads them again.
+      this.engineRef?.forgetEnv();
     });
   }
 
@@ -452,6 +553,8 @@ export class TtService implements TtController, ChatDriver {
     await this.feedWatcher?.detach().catch(() => undefined);
     this.feedWatcher = null;
     if (feedPage && !feedPage.isClosed()) await feedPage.close().catch(() => undefined);
+    this.engineRef?.flush();
+    this.engineRef = null;
     await this.run(async () => {
       await this.watcher?.detach().catch(() => undefined);
       await this.downloaderRef?.detach().catch(() => undefined);
@@ -530,11 +633,19 @@ export class TtService implements TtController, ChatDriver {
 
   /* ---------------------------------------------------------------- capture */
 
-  private onFrame(bytes: Buffer): void {
+  private onFrame(bytes: Buffer, dir: 'in' | 'out' = 'in'): void {
+    const engine = this.engineRef;
+    if (engine) {
+      if (dir === 'in' && engine.handleFrame(bytes)) this.lastEventAt = engine.lastEventAt ?? this.lastEventAt;
+      return;
+    }
     this.handleCandidates(bytes, null, 'live');
   }
 
   private onBody(bytes: Buffer, contentType: string): void {
+    // With the protocol engine the answers are our own requests', read directly: the schema-less reader must not
+    // store them a second time.
+    if (this.engineRef) return;
     this.handleCandidates(bytes, contentType, 'history');
   }
 
@@ -712,6 +823,10 @@ export class TtService implements TtController, ChatDriver {
     return a;
   }
 
+  protocol(): ImEngine | null {
+    return this.engineRef;
+  }
+
   async snapshot(): Promise<ThreadSnapshot | null> {
     const a = this.agentRef;
     if (!a || !this.page) return null;
@@ -768,6 +883,10 @@ export class TtService implements TtController, ChatDriver {
 
   /** Used by the media queue: a fresh DOM read of the conversation usually brings fresh signed links. */
   private async refreshMessage(_messageId: string, chatId: string): Promise<void> {
+    if (this.engineRef) {
+      await this.engineRef.refreshConversation(chatId).catch(() => undefined);
+      return;
+    }
     await this.ensureChatOpen(chatId).catch(() => undefined);
     const snap = await this.snapshot().catch(() => null);
     if (snap?.rows.length) this.ingestSnapshot(chatId, snap, 'history');

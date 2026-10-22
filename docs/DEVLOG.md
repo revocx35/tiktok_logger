@@ -1,5 +1,34 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.6.0: the IM protocol in the tab (no more reading the page)
+
+Owner: "just do what insta_logger does". insta_logger runs Instagram's own requests inside the tab; this is the TikTok
+equivalent, built from `/root/ref/matrix-tiktok` and **checked live** with `scripts/dev/im-probe.mts` (read-only, prints
+structure only):
+
+* The web client's IM API is protobuf on `im-api-sg.tiktok.com`. A `fetch` from the tab with `credentials:'include'`, the
+  `Accept` + `Content-Type: application/x-protobuf` headers and **no query string** works (an extra `Cache-Control`
+  header made the CORS preflight fail → "Failed to fetch"). Device id = `wid` from the page's rehydration JSON, token = the
+  `msToken` cookie.
+* `get_by_user_init` only ever returns the ten newest chats and ignores cursor/limit. The current web client uses
+  **`get_by_user_combo`** (type 204): an *ascending feed of every message of every conversation after a µs cursor*, 50
+  rows/page, two lanes (0 = one-to-one, 1 = groups), `hasMore` + next cursor. That is the catch-up primitive: poll it every
+  5 s from the stored cursor (rewound 90 s; ingest is idempotent).
+* `get_by_conversation` pages a chat's history; an unsent message stays there as a placeholder tagged `s:is_recalled`, so
+  unsends are *read*, not inferred from what vanished from the DOM (the old "missing" heuristic produced false positives:
+  the same fake-TikTok failure still shows on the fallback path).
+* The socket (`im-ws-sg…/ws/v2`) frames are `__lz4`-compressed protobuf: the old schema-less reader could not see them, so
+  live capture never worked and everything came from DOM polling. Now `parseSocketFrame` (LZ4 block + typed events: chat,
+  recall, reaction, read receipt, typing).
+* Ids in JSON bodies are 19-digit numbers: `s:property_modify` is read with a regex, never `JSON.parse`d into a number.
+* Sending: `/v1/message/send` with `ztca-dpop` (ES256 DPoP proof) + `tt-ticket-guard-*` for a fresh P-256 key per send, as
+  the reference does. **Not verified against a real send yet** (needs a recipient the owner names).
+* Private photos are AES-256-GCM blobs (`nonce|ciphertext|tag`, key in the message): decrypted in memory, stored by us.
+
+Fallback: when the probe fails (or on a non-tiktok.com origin, i.e. the test double) the page-driving path of v1.5 runs
+unchanged. Media uploads (photos/videos/voice) are still sent through the page. Page-read rows already in the database are
+adopted by the protocol rows (same text, ±6 min) and a false "missing" is cleared when the server shows the message.
+
 ## 2026-10-22 — v1.5.1: comments (stale panel, and Post stayed disabled)
 
 * The comment panel's close control is `[data-key-interaction="comment_close"] button` (`aria-label="exit"`); the old

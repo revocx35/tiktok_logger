@@ -15,6 +15,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 |---|---|
 | `shared/api.d.ts` | The HTTP API contract (types only), shared by server, web and the Android client |
 | `server/src/app.ts`, `http/`, `auth/`, `crypto/`, `db/`, `front/`, `supervisor/` | Fastify app, security hooks, login/2FA/sessions, envelope encryption, SQLite, gateway + one worker per user |
+| `server/src/tt/im/` | IM protocol in the tab: `wire.ts`, `proto.ts`, `engine.ts` (import, catch-up, unsend, send), `transport.ts` |
 | `server/src/tt/` | TikTok layer: `service.ts` (lifecycle, timers, tabs), `dom.ts` (messages page agent), `sender.ts`, `watcher.ts` (CDP capture), `frames.ts`/`mapper.ts`/`ingest.ts`, `feed.ts` (+`FeedCatalog`) / `feedAgent.ts` / `feedMedia.ts`, `download.ts`, `loginwatch.ts`, `cookies.ts` |
 | `server/src/api/` | Routes: chats, media, send, feed, admin, settings, audit, SSE |
 | `web/src/` | React UI (`pages/Feed.tsx`, `ChatView.tsx`, `Settings.tsx`, …) |
@@ -25,7 +26,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 ## Commands
 
 ```bash
-cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 153 tests
+cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 185 tests
 cd web && npm ci && npm test && npm run build                                        # strict-CSP build
 cd server && npx tsx ../scripts/dev/service-check.mts   # real service vs fake TikTok (headless Chromium)
 ```
@@ -44,6 +45,9 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 
 ## Never
 
+- Send a message twice: a send whose answer was lost (`maybeSent`) must not be retried through the page.
+- `JSON.parse` TikTok ids (19 digits exceed 2^53): keep them as strings / read them with a regex.
+- Add a `Cache-Control` (or other non-simple) header to in-tab IM fetches: the CORS preflight fails.
 - Log message text, names, cookies, tokens or media/CDN links.
 - Put two tabs of one window in front of each other for different jobs: a `hidden` tab ignores key events (the feed has
   its own window for this reason).

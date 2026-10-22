@@ -3,6 +3,14 @@
 Practical notes for the TikTok layer (`server/src/tt/`). Read this before debugging capture or sending, and **update it
 after a live check**: it is the only place where the facts behind the code are written down.
 
+## The IM protocol (verified live 2026-10-22)
+
+See DEVLOG v1.6.0 for the details. Endpoints (POST protobuf to `https://im-api-sg.tiktok.com`, no query needed for reads):
+`/v2/message/get_by_user_init` (203; ten newest chats), `/v1/message/get_by_user_combo` (204/10074, client version 1.8.3;
+the paged all-conversations feed), `/v1/message/get_by_conversation` (301), `/v1/message/send` (100; DPoP + ticket guard),
+`/v3/conversation/mark_read` (604). Socket `wss://im-ws-sg.tiktok.com/ws/v2` (binary, `__lz4`). Probe it read-only with
+`scripts/dev/im-probe.mts` (bundle with esbuild, run next to the browser; prints structure, never content).
+
 ## What is verified, and what is not
 
 | Area | Status |

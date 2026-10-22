@@ -92,7 +92,7 @@ export class BrowserDownloader implements Downloader {
       return { status: 'error', reason: 'no_frame' };
     }
     const res = (await withTimeout(
-      cdp.send('Network.loadNetworkResource', { frameId, url, options: { disableCache: false, includeCredentials: false } }),
+      cdp.send('Network.loadNetworkResource', { frameId, url, options: { disableCache: false, includeCredentials: this.inPage } }),
       60_000,
     )) as { resource: { success: boolean; httpStatusCode?: number; netErrorName?: string; stream?: string; headers?: Record<string, string> } } | null;
     if (!res) return { status: 'error', reason: 'timeout' };

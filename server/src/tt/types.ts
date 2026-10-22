@@ -45,6 +45,8 @@ export interface TtMedia {
   height?: number | null;
   durationMs?: number | null;
   thumbUrl?: string | null;
+  /** AES-256-GCM key (hex) of a private photo: the CDN serves it encrypted. Memory only. */
+  decryptKey?: string | null;
 }
 
 export interface TtReaction {

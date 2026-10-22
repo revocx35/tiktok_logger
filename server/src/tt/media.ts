@@ -1,3 +1,4 @@
+import { createDecipheriv } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AppContext } from '../context.js';
@@ -119,6 +120,41 @@ export async function downloadToMedia(
     return out.status === 'ok' ? { status: 'error', reason: 'empty' } : out;
   }
   const { mediaId, size } = await finishMediaFile(ctx, file, kind, pickMime(out.mime, impliedMime), null);
+  return { status: 'ok', mediaId, size };
+}
+
+/**
+ * Private photos are stored on the CDN as AES-256-GCM blobs (`nonce(12) | ciphertext | tag(16)`) with the key in the
+ * message. The whole blob is held in memory, decrypted, and only the plain bytes are written (encrypted again by us).
+ */
+export async function downloadDecryptedToMedia(
+  ctx: AppContext,
+  dl: Downloader,
+  url: string,
+  hexKey: string,
+  impliedMime: string | null,
+  maxBytes: number,
+): Promise<{ status: 'ok'; mediaId: number; size: number } | Exclude<FetchOutcome, { status: 'ok' }>> {
+  const parts: Buffer[] = [];
+  const out = await dl.fetch(url, maxBytes, async (chunk) => {
+    parts.push(chunk);
+  });
+  if (out.status !== 'ok') return out;
+  const blob = Buffer.concat(parts);
+  let plain: Buffer;
+  try {
+    const key = Buffer.from(hexKey, 'hex');
+    if (key.length !== 32 || blob.length < 29) return { status: 'error', reason: 'bad_blob' };
+    const d = createDecipheriv('aes-256-gcm', key, blob.subarray(0, 12));
+    d.setAuthTag(blob.subarray(blob.length - 16));
+    plain = Buffer.concat([d.update(blob.subarray(12, blob.length - 16)), d.final()]);
+  } catch {
+    return { status: 'error', reason: 'decrypt' };
+  }
+  const file = await beginMediaFile(ctx);
+  await file.writer.write(plain);
+  const mime = /^\x89PNG/.test(plain.subarray(0, 4).toString('latin1')) ? 'image/png' : plain.subarray(0, 4).toString('latin1') === 'RIFF' ? 'image/webp' : (impliedMime ?? 'image/jpeg');
+  const { mediaId, size } = await finishMediaFile(ctx, file, 'message', mime, null);
   return { status: 'ok', mediaId, size };
 }
 
@@ -265,7 +301,9 @@ export class MediaQueue {
       let last: Awaited<ReturnType<typeof downloadToMedia>> | null = null;
       for (const url of urls) {
         if (!isTikTokCdn(url, this.ctx.config.ttWebOrigin)) continue;
-        last = await downloadToMedia(this.ctx, dl, url, 'message', src.mime ?? null, max);
+        last = src.decryptKey
+          ? await downloadDecryptedToMedia(this.ctx, dl, url, src.decryptKey, src.mime ?? null, max)
+          : await downloadToMedia(this.ctx, dl, url, 'message', src.mime ?? null, max);
         if (last.status === 'ok' || last.status === 'too_large') break;
       }
       if (!last) return finish({ media_status: 'unavailable' });

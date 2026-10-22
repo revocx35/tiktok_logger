@@ -231,6 +231,24 @@ server/src/
   changes often; the API answers `not_supported` with a clear message and the UI hides those actions. Edit does not
   exist on TikTok at all.
 
+### IM protocol (`tt/im/`, v1.6+)
+
+Reading and sending go through TikTok's own IM API **from inside the tab** (`transport.ts` → `page.evaluate(fetch)`),
+exactly like insta_logger's in-tab GraphQL; the container has no internet and TikTok's cookies/origin are the tab's.
+`wire.ts` (protobuf reader/writer, LZ4 block), `proto.ts` (requests, answers, socket frames, content JSON), `engine.ts`
+(`ImEngine`: first import, catch-up, unsend check, live frames, send, mark-read, profiles), `transport.ts`.
+
+* **Live:** the Watcher hands every inbound socket frame to `ImEngine.handleFrame` (typed events). **Catch-up:** every 5 s
+  `get_by_user_combo` from the stored cursor (state `im_state`: cursors + conversation short ids). **Unsends:** a recall frame
+  flags the message at once (`deleted_by='sender'`); every `reconcileMinutes` the newest 15 chats' latest 50 messages are
+  re-read and `s:is_recalled` placeholders flag the rest. Nothing is opened in the page, so nothing is marked read by logging.
+* **Send:** `sendText` builds the type-100 request, DPoP-signs it with a fresh P-256 key (`ticketGuard`), stores the
+  message under TikTok's id. A refusal is "not sent"; a lost answer is `maybeSent` and is **never** retried through the
+  page (it could double-send). Media sends still use the page (`sender.ts`).
+* **Fallback:** if `ImEngine.probe()` fails the page-driving path (dom.ts, sync.ts, sender.ts) runs as before.
+* Threat model: all IM answers are untrusted input (bounded readers, 19-digit ids kept as strings, hosts checked before
+  cookies are attached, DPoP key never leaves the process).
+
 ### Feed (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
 
 * **Its own window.** The feed is opened in a second *window* (`newPage({type:'window'})`, `/<origin>/foryou`) on first use,

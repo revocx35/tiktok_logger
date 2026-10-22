@@ -3,6 +3,7 @@ import type { AppContext, TtSender } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import type { ChatDriver } from './driver.js';
 import { beginMediaFile, finishMediaFile } from './media.js';
+import { ImSendError } from './im/engine.js';
 import type { Ingest } from './ingest.js';
 import type { TtMessage } from './types.js';
 
@@ -26,6 +27,18 @@ export class Sender implements TtSender {
     const body = text.trim();
     if (!body) throw Errors.validation('The message is empty.');
     if (body.length > 2000) throw Errors.validation('TikTok messages are limited to 2000 characters.');
+    const proto = this.driver.protocol();
+    if (proto) {
+      try {
+        const id = await proto.sendText(chatId, body);
+        this.ctx.repo.audit('message_sent', null, 'text');
+        return { id };
+      } catch (e) {
+        if (!(e instanceof ImSendError)) throw e;
+        // The page is not used as a second chance: if TikTok may have the message already, typing it again would send it twice.
+        throw new AppError(502, 'send', e.message);
+      }
+    }
     await this.driver.ensureChatOpen(chatId);
     const agent = this.driver.agent();
     const typed = await agent.setText(body);
@@ -107,6 +120,11 @@ export class Sender implements TtSender {
   /** Opening the conversation is what marks it seen on TikTok. */
   async markRead(chatId: string): Promise<void> {
     if (!this.ctx.settings.get().readReceipts) return;
+    const proto = this.driver.protocol();
+    if (proto) {
+      await proto.markRead(chatId).catch(() => undefined);
+      return;
+    }
     await this.driver.ensureChatOpen(chatId);
   }
 }

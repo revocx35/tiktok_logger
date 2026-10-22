@@ -9,6 +9,8 @@ import type { TtMessage, ThreadSnapshot } from './types.js';
 export interface ChatDriver {
   /** Opens [chatId] in the tab (no-op when it is already open). */
   ensureChatOpen(chatId: string): Promise<void>;
+  /** The IM protocol engine when it is active (sending and reading then never touch the page's DOM). */
+  protocol(): import('./im/engine.js').ImEngine | null;
   /** The page agent; throws when TikTok is not connected or not logged in. */
   agent(): DomAgent;
   /** The open conversation as the page shows it. */
