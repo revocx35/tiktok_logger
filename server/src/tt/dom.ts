@@ -778,22 +778,47 @@ export class DomAgent {
    * filled in the page but the send stayed disabled. The element is tagged in the page, then focused and typed into here.
    */
   async setText(text: string): Promise<{ ok: boolean; error?: string; value?: string }> {
-    const tagged = await this.call<{ ok: boolean; error?: string }>('composerTag');
-    if (!tagged.ok) return { ok: false, error: tagged.error ?? 'no_composer' };
     const sel = '[data-ttl-compose="1"]';
-    try {
-      await this.page.focus(sel);
-      // Clear whatever a previous attempt left behind.
-      await this.page.keyboard.down('Control');
-      await this.page.keyboard.press('KeyA');
-      await this.page.keyboard.up('Control');
-      await this.page.keyboard.press('Backspace');
-      await this.page.keyboard.type(text, { delay: 8 });
-    } catch {
-      return { ok: false, error: 'typing_failed' };
+    const read = async (): Promise<string> =>
+      (await this.call<{ value: string }>('composerText').catch(() => ({ value: '' }))).value;
+    const focused = async (): Promise<boolean> =>
+      (await this.page
+        .evaluate((s2: string) => {
+          const el = document.querySelector(s2);
+          return !!el && (document.activeElement === el || (el.contains(document.activeElement as Node | null) ?? false));
+        }, sel)
+        .catch(() => false)) ?? false;
+    let last = '';
+    // TikTok re-renders the composer while it is being typed into and focus is lost with it, which used to leave only
+    // the last few characters in the box. Type in small pieces, take the focus back when it slips, and check the result.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const tagged = await this.call<{ ok: boolean; error?: string }>('composerTag');
+      if (!tagged.ok) return { ok: false, error: tagged.error ?? 'no_composer' };
+      try {
+        await this.page.focus(sel);
+        await this.page.keyboard.down('Control');
+        await this.page.keyboard.press('KeyA');
+        await this.page.keyboard.up('Control');
+        await this.page.keyboard.press('Backspace');
+      } catch {
+        return { ok: false, error: 'focus_failed' };
+      }
+      for (let at = 0; at < text.length; at += 24) {
+        if (!(await focused())) await this.page.focus(sel).catch(() => undefined);
+        await this.page.keyboard.type(text.slice(at, at + 24), { delay: 12 });
+      }
+      last = await read();
+      if (last.trim() === text.trim()) return { ok: true, value: last };
+      if (last.length && text.trim().startsWith(last.trim())) {
+        // The tail of the text is what made it in: type just the rest.
+        const rest = text.slice(text.length - (text.trim().length - last.trim().length));
+        if (!(await focused())) await this.page.focus(sel).catch(() => undefined);
+        await this.page.keyboard.type(rest, { delay: 12 });
+        last = await read();
+        if (last.trim() === text.trim()) return { ok: true, value: last };
+      }
     }
-    const read = await this.call<{ value: string }>('composerText').catch(() => ({ value: '' }));
-    return { ok: read.value.trim() === text.trim(), value: read.value };
+    return { ok: false, value: last };
   }
 
   /**
