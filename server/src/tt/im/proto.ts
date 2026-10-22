@@ -169,7 +169,7 @@ export interface SendArgs {
   /** Answer to another message: aweType 703 plus the reply attachment (field 11). */
   reply?: SendReply | null;
   /** A shared TikTok post instead of text: the card TikTok shows for a video or photo post. */
-  share?: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string } | null;
+  share?: { itemId: string; uid: string; secUid?: string; title?: string; cover?: ShareCover | null } | null;
 }
 
 /** The JSON blob TikTok puts in a reply's reference (refmsg_uid, refmsg_sec_uid, the quoted content). */
@@ -186,6 +186,15 @@ export function replyReferenceJson(parentContentJson: string, refmsgUid: string,
   });
 }
 
+/**
+ * The cover of a shared post. TikTok sends it as an object (`uri` = the storage key, `url_list` = signed links), not as
+ * a plain URL — a card whose `cover_url` is a string is accepted with status 0 and then never appears.
+ */
+export interface ShareCover {
+  uri?: string;
+  urls: string[];
+}
+
 /** The content JSON of a message: text (optionally a reply) or a shared post. */
 export function sendContent(a: Pick<SendArgs, 'text' | 'reply' | 'share'>): string {
   if (a.share) {
@@ -195,7 +204,7 @@ export function sendContent(a: Pick<SendArgs, 'text' | 'reply' | 'share'>): stri
       uid: a.share.uid,
       ...(a.share.secUid ? { sec_uid: a.share.secUid } : {}),
       ...(a.share.title ? { content_title: a.share.title } : {}),
-      ...(a.share.cover ? { cover_url: a.share.cover } : {}),
+      ...(a.share.cover && a.share.cover.urls.length ? { cover_url: { uri: a.share.cover.uri ?? '', url_list: a.share.cover.urls } } : {}),
     };
     return JSON.stringify(share);
   }

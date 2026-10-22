@@ -597,7 +597,7 @@ export class ImEngine {
    * message: the content is an `aweType: 800` body carrying the item id and its author, which the app renders as a
    * shared post and the other side sees like any shared video.
    */
-  async sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string }): Promise<string> {
+  async sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: { uri?: string; urls: string[] } | null }): Promise<string> {
     return this.serial(async () => {
       const info = await this.infoFor(chatId);
       if (!info) throw new ImSendError('This conversation is not known to TikTok yet. Open it on the TikTok screen once.', false);

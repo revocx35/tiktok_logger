@@ -13,7 +13,7 @@ import type { SettingsStore } from './settings.js';
 export interface TtSender {
   sendText(chatId: string, text: string, quotedId: string | null, quotedText?: string | null): Promise<SendResult>;
   /** Shares a TikTok post into a conversation as a card (not a link). */
-  sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: string }): Promise<SendResult>;
+  sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: { uri?: string; urls: string[] } | null }): Promise<SendResult>;
   sendMedia(chatId: string, file: { data: Buffer; mime: string; filename: string | null }, kind: SendMediaKind, quotedId: string | null): Promise<SendResult>;
   /** An empty emoji removes the owner's reaction ([previous]: the emoji being removed, TikTok needs it). */
   react(messageId: string, emoji: string, previous?: string | null): Promise<void>;

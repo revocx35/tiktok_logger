@@ -395,7 +395,7 @@ describe('send content: replies and shared posts', () => {
       text: '',
       clientMessageId: 'c-2',
       publicKeyB64: 'pk',
-      share: { itemId: '7412345678901234567', uid: '7412345678900000001', secUid: 'MS4wLj', title: 'a video', cover: 'https://p16.example.com/c.jpg' },
+      share: { itemId: '7412345678901234567', uid: '7412345678900000001', secUid: 'MS4wLj', title: 'a video', cover: { uri: 'tos-key', urls: ['https://p16.example.com/c.jpg'] } },
     });
     const send = sub(sub(readFields(body), 8)!, 100)!;
     expect(JSON.parse(str(send, 4))).toEqual({
@@ -404,7 +404,7 @@ describe('send content: replies and shared posts', () => {
       uid: '7412345678900000001',
       sec_uid: 'MS4wLj',
       content_title: 'a video',
-      cover_url: 'https://p16.example.com/c.jpg',
+      cover_url: { uri: 'tos-key', url_list: ['https://p16.example.com/c.jpg'] },
     });
   });
 

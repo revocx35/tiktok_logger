@@ -525,7 +525,7 @@ export class FeedService {
       uid: item.authorId,
       ...(item.authorSecUid ? { secUid: item.authorSecUid } : {}),
       ...(item.desc ? { title: item.desc.slice(0, 120) } : {}),
-      ...(item.cover ? { cover: item.cover } : {}),
+      ...(item.cover ? { cover: { urls: [item.cover] } } : {}),
     });
     return { id: sent.id ?? '' };
   }
