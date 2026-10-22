@@ -230,6 +230,8 @@ function render() {
     el.className = 'item';
     el.setAttribute('data-e2e', 'recommend-list-item-container');
     el.setAttribute('data-item-id', it.id);
+    // Same numbering as the live page: the feed's own position, and the video id on the more-actions button.
+    el.setAttribute('data-scroll-index', String(i));
     el.innerHTML =
       '<video src="/media/' + it.id + '.mp4" poster="/media/' + it.id + '.jpg" loop muted playsinline></video>' +
       '<div class="meta">' +
@@ -239,6 +241,7 @@ function render() {
         '<p class="stats"><span data-e2e="video-views">' + fmt(it.plays) + '</span> plays</p>' +
       '</div>' +
       '<div class="rail">' +
+        '<button data-e2e="more-menu-icon" data-more-menu-item-id="' + it.id + '">…</button>' +
         '<button data-e2e="like-icon" aria-pressed="' + (it.liked ? 'true' : 'false') + '" onclick="like(' + i + ')">♥ <strong data-e2e="like-count">' + fmt(it.likes) + '</strong></button>' +
         '<button data-e2e="comment-icon" onclick="openComments()">💬 <strong data-e2e="comment-count">' + fmt(it.comments) + '</strong></button>' +
         '<button data-e2e="share-icon">↗ <strong data-e2e="share-count">' + fmt(it.shares) + '</strong></button>' +
@@ -247,6 +250,16 @@ function render() {
   });
   box.scrollTop = current * window.innerHeight;
 }
+
+// The live feed is a snapping scroll container: moving it one item up/down is what next/previous does.
+document.getElementById('feed').addEventListener('scroll', () => {
+  const box = document.getElementById('feed');
+  const idx = Math.round(box.scrollTop / Math.max(1, box.clientHeight));
+  if (idx >= 0 && idx < items.length) {
+    current = idx;
+    for (const v of box.querySelectorAll('video')) v.play().catch(() => undefined);
+  }
+});
 
 function go(dir) {
   current = Math.max(0, Math.min(items.length - 1, current + dir));

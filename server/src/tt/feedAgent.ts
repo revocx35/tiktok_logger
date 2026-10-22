@@ -276,6 +276,36 @@ const AGENT = String.raw`
     return false;
   };
 
+  /**
+   * Brings a specific video back on screen. TikTok's page plays and advances by itself, so by the time the UI asks to
+   * like or to read the comments of the video it is showing, the page may already be on the next one. Every item is
+   * keyed by its video id in the more-actions button, so the right one can be found and scrolled back into view.
+   */
+  const ensureItem = (id) => {
+    if (!id) return { ok: false, error: 'no_id' };
+    const keyed = all('[data-more-menu-item-id]').find((el) => el.getAttribute('data-more-menu-item-id') === String(id));
+    const item = keyed && keyed.closest('[data-scroll-index]');
+    if (!item) return { ok: false, error: 'not_rendered' };
+    const r = item.getBoundingClientRect();
+    if (r.top > -60 && r.top < 60) return { ok: true, already: true };
+    item.scrollIntoView({ block: 'start', behavior: 'instant' });
+    return { ok: true, already: false };
+  };
+
+  /**
+   * Stops the page's own playback. The app plays its own copy of the video; leaving the page playing makes it advance to
+   * the next video after a few seconds, which is what made likes and comments hit the wrong item.
+   */
+  const hold = () => {
+    let paused = 0;
+    for (const v of all('video')) {
+      try {
+        if (!v.paused) { v.pause(); paused++; }
+      } catch (e) { /* a detached element is fine */ }
+    }
+    return { paused };
+  };
+
   /** Items in feed order, as TikTok numbers them. */
   const orderedItems = () => all('[data-scroll-index]')
     .map((el) => ({ el, i: Number(el.getAttribute('data-scroll-index')) }))
@@ -411,6 +441,8 @@ const AGENT = String.raw`
     version: 1,
     current: () => current(),
     step: (d) => step(d),
+    ensureItem: (id) => ensureItem(id),
+    hold: () => hold(),
     like: () => like(),
     openComments: () => openComments(),
     closeComments: () => closeComments(),
@@ -509,6 +541,16 @@ export class FeedAgent {
 
   current(): Promise<RawFeedItem | null> {
     return this.call('current');
+  }
+
+  /** Brings a video back on screen (TikTok advances on its own between two requests). */
+  ensureItem(id: string): Promise<{ ok: boolean; already?: boolean; error?: string }> {
+    return this.call('ensureItem', id);
+  }
+
+  /** Pauses the page's playback so the feed stays on the video the app is showing. */
+  hold(): Promise<{ paused: number }> {
+    return this.call('hold');
   }
 
   /** The next videos in the feed, with the signed URLs the page already knows (used to warm the media cache). */

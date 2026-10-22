@@ -207,6 +207,7 @@ export class FeedService {
       if (!raw) return null;
       this.lastId = raw.id ?? this.lastId;
       const item = this.toItem(raw);
+      void agent.hold().catch(() => undefined);
       void this.warmAhead(agent);
       return item;
     });
@@ -229,6 +230,7 @@ export class FeedService {
           // Give the video element a moment to have a source.
           const withSrc = await this.waitForSrc(agent, 4000);
           this.lastId = withSrc.id ?? this.lastId;
+          void agent.hold().catch(() => undefined);
           const item = this.toItem(withSrc);
           void this.warmAhead(agent);
           return item;
@@ -283,15 +285,33 @@ export class FeedService {
     };
   }
 
+  /* ---------------------------------------------------------------- pinning */
+
+  /**
+   * Makes sure the page is showing the video the UI is talking about.
+   *
+   * TikTok's page plays and advances by itself, so between reading the feed and liking or opening the comments of that
+   * video the page may already have moved on — which used to fail with "that video is not on screen any more". The page
+   * is therefore held on the visible video after every read, and a request for another one scrolls it back.
+   */
+  private async pin(agent: FeedAgent, id: string | null): Promise<void> {
+    const cur = await agent.current().catch(() => null);
+    if (!id || !cur?.id || cur.id === id) return;
+    const res = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
+    if (!res.ok) throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
+    await sleep(500);
+    await agent.hold().catch(() => undefined);
+  }
+
   /* ------------------------------------------------------------------ like */
 
   /** Likes (or un-likes) the video in view. Refuses when the feed moved on to another video. */
   async like(id: string, want: boolean): Promise<{ liked: boolean }> {
     return this.run(async () => {
       const agent = await this.ensureAgent();
+      await this.pin(agent, id);
       const item = await agent.current().catch(() => null);
       if (!item) throw new AppError(409, 'feed_moved', 'The feed changed. Reload the video and try again.');
-      if (item.id && id && item.id !== id) throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
       if (item.liked === want) return { liked: item.liked };
       await agent.like();
       const deadline = Date.now() + 4000;
@@ -313,10 +333,9 @@ export class FeedService {
   async comments(id: string): Promise<FeedComment[]> {
     return this.run(async () => {
       const agent = await this.ensureAgent();
-      const item = await agent.current().catch(() => null);
-      if (item?.id && id && item.id !== id) throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
+      await this.pin(agent, id);
       await agent.openComments();
-      const deadline = Date.now() + 6000;
+      const deadline = Date.now() + 8000;
       while (Date.now() < deadline) {
         const panel = await agent.comments().catch(() => null);
         if (panel?.open) return panel.comments.map(toComment);
@@ -332,10 +351,9 @@ export class FeedService {
     if (body.length > 150) throw Errors.validation('TikTok comments are limited to 150 characters.');
     return this.run(async () => {
       const agent = await this.ensureAgent();
-      const item = await agent.current().catch(() => null);
-      if (item?.id && id && item.id !== id) throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
+      await this.pin(agent, id);
       await agent.openComments();
-      const deadline = Date.now() + 6000;
+      const deadline = Date.now() + 8000;
       while (Date.now() < deadline) {
         const panel = await agent.comments().catch(() => null);
         if (panel?.open) break;
