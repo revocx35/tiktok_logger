@@ -209,7 +209,11 @@ export class ApiFeed implements TtFeed {
       ...(item.authorSecUid ? { secUid: item.authorSecUid } : {}),
       ...(item.authorName ? { name: item.authorName } : {}),
       ...(item.desc ? { title: item.desc.slice(0, 120) } : {}),
-      ...(item.cover ? { cover: { urls: [item.cover] }, thumb: { urls: [item.cover] } } : {}),
+      ...(item.cover ? { cover: { urls: [item.cover] } } : {}),
+      // The card's thumb is the **author's avatar**, not the video's cover: TikTok's own DM share dialog sends the
+      // avatar there, and a body whose thumb is the cover is accepted with status 0 and then never stored (verified
+      // live 2026-10-23 by sending both bodies into a chat and reading the conversation back).
+      ...((item.avatar ?? item.cover) ? { thumb: { urls: [item.avatar ?? item.cover] as string[] } } : {}),
       ...(item.videoWidth ? { width: item.videoWidth } : {}),
       ...(item.videoHeight ? { height: item.videoHeight } : {}),
     });

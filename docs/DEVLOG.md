@@ -1,5 +1,33 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.11.1: the card's thumb is the author's avatar (that was the drop)
+
+v1.11.0 sent the right message type (8, Video) and still got the link fallback. So the payload itself was next, and the
+answer came from TikTok's own request bytes. Its web client sends that card over its **WebSocket** (not HTTP), so a
+`fetch`/`XMLHttpRequest` hook saw nothing — the capture that worked was `Network.webSocketFrameSent` on the CDP session
+while driving the real "Share to" panel (share icon → recipient → Send), then decoding the protobuf frame by hand:
+
+```
+frame  1=10004  2=<ms>  8=<envelope>  8.15=<ticket-guard/metadata>
+body (8.8.100): 1=convId  2=1  3=<sourceId>  4=<content JSON>  5=tags  6=8  7="deprecated"  8=clientMessageId
+content: {"aweType":800,"itemId":…,"uid":…,"secUID":…,
+          "content_thumb":{"url_list":[<AUTHOR AVATAR 100×100>],"uri":<avatar>},
+          "content_name":<nickname>,
+          "cover_url":{"url_list":[<video cover>],"uri":<cover>},"cover_width":576,"cover_height":1024}
+```
+
+Everything matched what we already sent **except `content_thumb`**: TikTok puts the *author's avatar* there; we put the
+video's cover. Proven with one live send of each body into a real chat and a conversation read-back: the avatar body is
+stored (the card appears and comes back from `get_by_conversation` with `aweType":800` and the item id), the cover body
+is accepted with status 0 and never stored.
+
+Fix: `ApiFeed.share` and `FeedService.share` pass `thumb: {urls: [author avatar]}` (`avatarMedium`/`avatarThumb` from the
+item list), falling back to the cover only when TikTok gave no avatar. `tt/feedApi.test.ts` pins it.
+
+How the capture was made, for next time: a `fetch`/XHR hook is not enough for the IM SDK — it writes to its socket.
+`page.createCDPSession()` + `Network.enable` + `Network.webSocketFrameSent` records the frames; each is protobuf,
+first field = command (10004 = send), and the card JSON is plain text inside field 8.8.100.4.
+
 ## 2026-10-22 — v1.11.0: shared posts go out as Video messages
 
 Owner: "can you try implement it", after asking whether the other side can see our share as a card at all.

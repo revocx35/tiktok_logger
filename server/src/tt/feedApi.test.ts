@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppContext } from '../context.js';
 import { ApiFeed } from './feedApi.js';
+import type { ShareArgs } from './im/proto.js';
 import { makeCtx } from './testutil.js';
 import { WebApi, WebApiError } from './web/api.js';
 
@@ -8,7 +9,7 @@ const id = (n: number) => `76000000000000000${String(n).padStart(2, '0')}`;
 const item = (n: number) => ({
   id: id(n),
   desc: `caption ${n}`,
-  author: { uniqueId: `user${n}`, nickname: `User ${n}`, avatarThumb: `https://p16.tiktokcdn.com/a${n}.jpeg` },
+  author: { id: `700000000000000${String(n).padStart(3, '0')}`, uniqueId: `user${n}`, nickname: `User ${n}`, secUid: `MS4w.${n}`, avatarThumb: `https://p16.tiktokcdn.com/a${n}.jpeg` },
   video: { playAddr: `https://v16.tiktokcdn.com/v${n}.mp4`, cover: `https://p16.tiktokcdn.com/c${n}.jpg` },
   music: { title: 'sound' },
   stats: { diggCount: 10 * n, commentCount: n, shareCount: 1, playCount: 100 },
@@ -85,6 +86,23 @@ describe('ApiFeed', () => {
     expect(feedCalls()).toBe(2); // swiping around inside what is loaded costs nothing
     expect((await feed.goto(id(8))).items.length).toBeGreaterThan(1);
     await expect(feed.goto('7600000000000099999')).rejects.toMatchObject({ code: 'feed_moved' });
+  });
+
+  it('shares a video as a card whose thumb is the author avatar (the cover there gets dropped)', async () => {
+    await feed.window(3);
+    const sent: ShareArgs[] = [];
+    ctx.tt = {
+      ...ctx.tt,
+      sender: { ...ctx.tt.sender, sendShare: async (_chatId: string, share: ShareArgs) => (void sent.push(share), { id: '1' }) },
+    };
+    await feed.share(id(1), '0:1:7000000000000000001:7000000000000000002');
+    expect(sent[0]).toMatchObject({
+      itemId: id(1),
+      // TikTok's own DM share dialog puts the author's avatar in content_thumb; a card with the video cover there is
+      // accepted and never stored.
+      thumb: { urls: ['https://p16.tiktokcdn.com/a1.jpeg'] },
+      cover: { urls: ['https://p16.tiktokcdn.com/c1.jpg'] },
+    });
   });
 
   it('steps forward and back, and does not step before the start', async () => {
