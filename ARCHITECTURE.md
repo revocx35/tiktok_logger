@@ -249,7 +249,14 @@ exactly like insta_logger's in-tab GraphQL; the container has no internet and Ti
 * Threat model: all IM answers are untrusted input (bounded readers, 19-digit ids kept as strings, hosts checked before
   cookies are attached, DPoP key never leaves the process).
 
-### Feed (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
+### Feed through the web API (`tt/feedApi.ts`, `tt/web/api.ts`, v1.7+)
+
+When the protocol engine is active the feed, comments and likes use TikTok's web API from the messages tab instead of a feed
+page: `ApiFeed` (item list → `FeedCatalog`, index moves, `digg`, `comment/list`, `comment/publish`) over `WebApi` (the page's
+own `fetch`, which TikTok's hook signs). `routedFeed` in service.ts sends reads to the page-driving `FeedService` below only
+if the API fails; likes and comments are never retried through the page.
+
+### Feed, page-driving fallback (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
 
 * **Its own window.** The feed is opened in a second *window* (`newPage({type:'window'})`, `/<origin>/foryou`) on first use,
   so the messages tab keeps its position, its stream socket and its "who is on screen" state. It must be a window and not a

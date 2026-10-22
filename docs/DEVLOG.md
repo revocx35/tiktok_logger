@@ -1,5 +1,20 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.7.0: the feed, comments and likes through TikTok's web API (no feed page)
+
+Same idea as the IM protocol, for `www.tiktok.com/api/...`: TikTok's page hooks `fetch` and signs any request that carries the
+browser/device parameters its own requests carry (`X-Bogus`, `X-Gnarly`, `X-Dynosaur`, `msToken`, CSRF, ticket guard). Measured
+live from the *messages* tab: with the full parameter set (`web/api.ts`) the comment list, the feed list and ranged video fetches all
+answer; with fewer parameters, or with `msToken` added by hand, TikTok answers **200 with an empty body** (treat that as a refusal).
+
+* Feed: `POST /api/recommend/item_list/` (6 videos, each with its signed `playAddr`) fills the catalog; a swipe is an index move;
+  the list is topped up when fewer than 6 follow. Photo posts (no `playAddr`) are skipped. Videos are downloaded in the messages tab.
+* Comments: `GET /api/comment/list/` (+ inline replies), `POST /api/comment/publish/` (text in the query, empty body).
+* Likes: `POST /api/commit/item/digg/` (`type=1|0`). The publish/digg request shapes were captured by intercepting the page's own
+  requests and aborting them (`Fetch.failRequest`), so nothing was posted or liked. **Posting a comment and liking are not yet
+  verified end to end**; the page-driving feed (v1.5) remains as a fallback for reads, never for writes (a lost answer must not
+  be repeated another way).
+
 ## 2026-10-22 — v1.6.1: ~800 empty "chats" from the old capture are hidden
 
 Found on the deployment after v1.6.0: 808 chats, 17 with messages. The schema-less reader of v1.0–1.5 made a chat of any object

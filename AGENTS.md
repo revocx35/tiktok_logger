@@ -15,6 +15,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 |---|---|
 | `shared/api.d.ts` | The HTTP API contract (types only), shared by server, web and the Android client |
 | `server/src/app.ts`, `http/`, `auth/`, `crypto/`, `db/`, `front/`, `supervisor/` | Fastify app, security hooks, login/2FA/sessions, envelope encryption, SQLite, gateway + one worker per user |
+| `server/src/tt/web/api.ts`, `tt/feedApi.ts` | Feed/comments/likes through the web API from the messages tab (page-driving `feed.ts` is the fallback) |
 | `server/src/tt/im/` | IM protocol in the tab: `wire.ts`, `proto.ts`, `engine.ts` (import, catch-up, unsend, send), `transport.ts` |
 | `server/src/tt/` | TikTok layer: `service.ts` (lifecycle, timers, tabs), `dom.ts` (messages page agent), `sender.ts`, `watcher.ts` (CDP capture), `frames.ts`/`mapper.ts`/`ingest.ts`, `feed.ts` (+`FeedCatalog`) / `feedAgent.ts` / `feedMedia.ts`, `download.ts`, `loginwatch.ts`, `cookies.ts` |
 | `server/src/api/` | Routes: chats, media, send, feed, admin, settings, audit, SSE |
@@ -26,7 +27,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 ## Commands
 
 ```bash
-cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 185 tests
+cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 194 tests
 cd web && npm ci && npm test && npm run build                                        # strict-CSP build
 cd server && npx tsx ../scripts/dev/service-check.mts   # real service vs fake TikTok (headless Chromium)
 ```
@@ -55,6 +56,8 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 - Attach to the tab while logged out (`loginwatch.ts`), weaken CSP/cookies/CSRF/the Chromium sandbox, edit old migrations.
 
 ## Gotchas
+
+- TikTok answers a request it does not like with **200 and an empty body**; `WebApi.json` turns that into an error.
 
 - The container runs `dist/`: tests + build do not prove it boots (CI polls `/healthz`).
 - `service-check.mts` "the unsent message is kept and flagged" currently fails (also on v1.4.3) — known, unresolved.

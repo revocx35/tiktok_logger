@@ -83,6 +83,16 @@ export class FeedCatalog {
     if (it.likes !== null) it.likes = Math.max(0, it.likes + (liked ? 1 : -1));
   }
 
+  /** The [n] items after position [index] (0-based) in feed order; a negative start counts from the beginning. */
+  afterIndex(index: number, n: number): CatalogItem[] {
+    const out: CatalogItem[] = [];
+    for (const k of this.order.slice(Math.max(0, index + 1), Math.max(0, index + 1) + n)) {
+      const it = this.byId.get(k);
+      if (it) out.push(it);
+    }
+    return out;
+  }
+
   /** Position in feed order, or -1. */
   indexOf(id: string | null): number {
     return id ? this.order.indexOf(id) : -1;

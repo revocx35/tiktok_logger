@@ -1,7 +1,7 @@
 import type { Browser, Page } from 'puppeteer';
 import puppeteer from 'puppeteer';
 import type { SendMediaKind, SendResult, TtState, TtStatus } from '../../../shared/api.js';
-import type { AppContext, PageProbe, TtController, TtDiagnostics, TtSender } from '../context.js';
+import type { AppContext, PageProbe, TtController, TtDiagnostics, TtFeed, TtSender } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import { maskId } from '../log.js';
 import { classifyUrl, closeOtherTabs, pickTikTokTab } from './browser.js';
@@ -11,6 +11,8 @@ import { DEFAULT_SELECTORS, DomAgent, mergeSelectors, type DomSelectors } from '
 import type { ChatDriver } from './driver.js';
 import { BrowserDownloader } from './download.js';
 import { FeedCatalog, FeedService } from './feed.js';
+import { ApiFeed } from './feedApi.js';
+import { WebApi } from './web/api.js';
 import { Ingest, MediaSources } from './ingest.js';
 import { lookAtTab, nextLoginStep, setSessionCookies, steerTab } from './loginwatch.js';
 import { MediaQueue } from './media.js';
@@ -70,7 +72,11 @@ export class TtService implements TtController, ChatDriver {
   readonly ingest: Ingest;
   readonly sender: TtSender;
   readonly sync: Sync;
-  readonly feed: FeedService;
+  /** The feed the HTTP layer talks to: the web API when it is active, else the page-driving one. */
+  readonly feed: TtFeed;
+  private readonly pageFeed: FeedService;
+  private readonly apiFeed: ApiFeed;
+  private webApiRef: WebApi | null = null;
   /** Item ids and signed video URLs captured from the For You page's own JSON. */
   private readonly feedCatalog = new FeedCatalog();
   /** The For You tab (created on demand, kept for the session; never the messages tab). */
@@ -96,7 +102,9 @@ export class TtService implements TtController, ChatDriver {
     });
     this.ingest = new Ingest(ctx, ctx.events, this.sources, this.media);
     this.sender = new Sender(ctx, this.ingest, this);
-    this.feed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
+    this.pageFeed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
+    this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef);
+    this.feed = routedFeed(() => (this.webApiRef ? this.apiFeed : null), this.pageFeed);
     this.sync = new Sync(ctx, {
       threads: () => this.readThreads(),
       openChat: (id) => this.ensureChatOpen(id),
@@ -423,7 +431,8 @@ export class TtService implements TtController, ChatDriver {
       /* the page-reported id stays */
     }
     this.engineRef = engine;
-    this.ctx.log.info('TikTok IM protocol active');
+    this.webApiRef = new WebApi({ evaluate: (fn, ...args) => page.evaluate(fn as never, ...(args as unknown as never[])) as never });
+    this.ctx.log.info('TikTok IM protocol and web API active');
     return engine;
   }
 
@@ -547,7 +556,7 @@ export class TtService implements TtController, ChatDriver {
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
     this.media.pause();
-    await this.feed.reset().catch(() => undefined);
+    await this.pageFeed.reset().catch(() => undefined);
     const feedPage = this.feedPageRef;
     this.feedPageRef = null;
     await this.feedWatcher?.detach().catch(() => undefined);
@@ -555,6 +564,8 @@ export class TtService implements TtController, ChatDriver {
     if (feedPage && !feedPage.isClosed()) await feedPage.close().catch(() => undefined);
     this.engineRef?.flush();
     this.engineRef = null;
+    this.webApiRef = null;
+    this.apiFeed.reset();
     await this.run(async () => {
       await this.watcher?.detach().catch(() => undefined);
       await this.downloaderRef?.detach().catch(() => undefined);
@@ -942,3 +953,28 @@ const readBodySafe = (b: Buffer, ct: string) => readBodyRaw(b, ct);
 export { DEFAULT_SELECTORS };
 export type { SendMediaKind, SendResult };
 export { maskId };
+
+/**
+ * Picks the feed per call: the web API one while it is active; reads fall back to the page-driving one when the API
+ * fails (writes never do: a like or comment that may have gone through must not be repeated another way).
+ */
+function routedFeed(api: () => ApiFeed | null, page: FeedService): TtFeed {
+  const read = <T>(call: (f: TtFeed) => Promise<T>): Promise<T> => {
+    const a = api();
+    return a ? call(a).catch((e: unknown) => (e instanceof AppError && e.statusCode < 500 ? Promise.reject(e) : call(page))) : call(page);
+  };
+  const pick = (): TtFeed => api() ?? page;
+  return {
+    current: () => read((f) => f.current()),
+    window: (limit) => read((f) => f.window(limit)),
+    goto: (id) => read((f) => f.goto(id)),
+    step: (dir) => read((f) => f.step(dir)),
+    like: (id, want) => pick().like(id, want),
+    comments: (id) => read((f) => f.comments(id)),
+    comment: (id, text) => pick().comment(id, text),
+    closeComments: () => pick().closeComments(),
+    mediaOf: (ref) => api()?.mediaOf(ref).then((r) => r ?? page.mediaOf(ref)) ?? page.mediaOf(ref),
+    mediaCached: (ref) => (api()?.mediaCached(ref) ?? false) || page.mediaCached(ref),
+    mediaStats: () => (api() ?? page).mediaStats(),
+  };
+}
