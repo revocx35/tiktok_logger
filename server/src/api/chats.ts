@@ -5,9 +5,9 @@ import type { AppContext } from '../context.js';
 import { F, decodeCursor, encodeCursor, type MessageRow } from '../db/repo.js';
 import { Errors } from '../errors.js';
 import { getReader } from '../http/server.js';
+import { ChatIdParam } from './ids.js';
 import { Presenter } from './view.js';
 
-const ChatIdParam = z.object({ chatId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) });
 const MessageIdParam = z.object({ messageId: z.string().min(3).max(300).regex(/^[^\s/?#]+$/) });
 const Cursor = z.string().regex(/^\d{1,16}_\d{1,16}$/).optional();
 const Limit = z.coerce.number().int().min(1).max(200).default(60);

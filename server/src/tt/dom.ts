@@ -688,9 +688,9 @@ export class DomAgent {
       quotedText: row.quotedText ?? null,
     }));
     // In a group chat TikTok prints the sender's name inside the message text, on its own first line: split it out so
-    // the bubble keeps the words and the row keeps the author (a group id looks like 0:1:<self>:<conv>, a 1:1 chat is a
-    // bare number, so this cannot misfire on a two-line message in a direct chat).
-    const group = typeof r.threadId === 'string' && r.threadId.startsWith('0:1:');
+    // the bubble keeps the words and the row keeps the author. A direct chat is `0:1:<uid>:<uid>` and never shows a
+    // sender name, so only the other ids (groups: a bare number) are split — a two-line DM is left alone.
+    const group = typeof r.threadId === 'string' && !r.threadId.startsWith('0:1:');
     if (group) {
       for (const row of rows) {
         if (row.senderName || !row.text || row.text.indexOf('\n') < 0) continue;

@@ -6,8 +6,8 @@ import type { AppContext } from '../context.js';
 import { F } from '../db/repo.js';
 import { Errors } from '../errors.js';
 import { getReader, requireSession } from '../http/server.js';
+import { ChatIdParam } from './ids.js';
 
-const ChatIdParam = z.object({ chatId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) });
 const MessageId = z.string().min(3).max(300).regex(/^[^\s/?#%]+$/);
 const MessageIdParam = z.object({ messageId: MessageId });
 /** TikTok's own limit for a direct message. */
