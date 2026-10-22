@@ -29,6 +29,96 @@ const MEDIA_MAX = 200 * 1024 * 1024;
 const REF_TTL_MS = 30 * 60_000;
 const MAX_REFS = 64;
 
+/**
+ * What the For You page's own JSON knows and the DOM does not: the item id (the DOM has no link to it) and the signed
+ * video URL (the page plays through MSE, so `video.src` is a `blob:`). The watcher feeds this from
+ * `/api/recommend/item_list/` responses; lookups match the item on screen by author and the start of its caption.
+ */
+export interface CatalogItem {
+  id: string;
+  author: string | null;
+  desc: string | null;
+  playAddr: string | null;
+  cover: string | null;
+  music: string | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  plays: number | null;
+}
+
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const norm = (s: string | null | undefined): string => (s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+export class FeedCatalog {
+  private readonly byId = new Map<string, CatalogItem>();
+  private order: string[] = [];
+
+  get size(): number {
+    return this.byId.size;
+  }
+
+  ingest(body: Buffer | string): void {
+    let data: unknown;
+    try {
+      data = JSON.parse(typeof body === 'string' ? body : body.toString('utf8'));
+    } catch {
+      return;
+    }
+    const root = data as { itemList?: unknown; item_list?: unknown; data?: { itemList?: unknown } };
+    const list = (root?.itemList ?? root?.item_list ?? root?.data?.itemList) as unknown;
+    if (!Array.isArray(list)) return;
+    for (const raw of list) {
+      const it = raw as {
+        id?: unknown;
+        desc?: unknown;
+        author?: { uniqueId?: unknown; nickname?: unknown };
+        video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown };
+        music?: { title?: unknown };
+        stats?: { diggCount?: unknown; commentCount?: unknown; shareCount?: unknown; playCount?: unknown };
+      };
+      const id = String(it?.id ?? '');
+      if (!/^\d{6,24}$/.test(id)) continue;
+      const v = it.video ?? {};
+      const str = (x: unknown): string | null => (typeof x === 'string' && x.length > 8 ? x : null);
+      const entry: CatalogItem = {
+        id,
+        author: typeof it.author?.uniqueId === 'string' ? it.author.uniqueId : null,
+        desc: typeof it.desc === 'string' ? it.desc : null,
+        playAddr: str(v.playAddr) ?? str(v.play_addr) ?? str(v.downloadAddr),
+        cover: str(v.cover) ?? str(v.originCover),
+        music: typeof it.music?.title === 'string' ? it.music.title : null,
+        likes: num(it.stats?.diggCount),
+        comments: num(it.stats?.commentCount),
+        shares: num(it.stats?.shareCount),
+        plays: num(it.stats?.playCount),
+      };
+      if (!this.byId.has(id)) this.order.push(id);
+      this.byId.set(id, entry);
+    }
+    while (this.order.length > 300) {
+      const old = this.order.shift();
+      if (old) this.byId.delete(old);
+    }
+  }
+
+  /** The item on screen: same author, and one caption is the start of the other (TikTok truncates the DOM text). */
+  find(author: string | null, caption: string | null): CatalogItem | null {
+    const a = norm(author);
+    const c = norm(caption).replace(/\.\.\.$/, '');
+    let best: CatalogItem | null = null;
+    for (const id of this.order) {
+      const it = this.byId.get(id);
+      if (!it) continue;
+      if (a && norm(it.author) !== a) continue;
+      const d = norm(it.desc).replace(/\.\.\.$/, '');
+      if (c && d && !(d.startsWith(c.slice(0, 40)) || c.startsWith(d.slice(0, 40)))) continue;
+      best = it;
+    }
+    return best;
+  }
+}
+
 export class FeedService {
   private agent: FeedAgent | null = null;
   private page: Page | null = null;
@@ -41,6 +131,7 @@ export class FeedService {
   constructor(
     private readonly ctx: AppContext,
     private readonly provider: FeedPageProvider,
+    private readonly catalog: FeedCatalog | null = null,
   ) {}
 
   /** True when the feed can be used (TikTok connected and logged in). */
@@ -146,19 +237,30 @@ export class FeedService {
   }
 
   private toItem(raw: RawFeedItem): FeedItem {
-    const id = raw.id ?? syntheticItemId(raw);
-    const video = raw.video?.src ? this.register(raw.video.src, 'video/mp4') : null;
-    const poster = raw.video?.poster ? this.register(raw.video.poster, 'image/jpeg') : null;
+    // The DOM cannot name the item (no link) and cannot give its video (MSE `blob:` source); the captured item list can.
+    const known = this.catalog?.find(raw.author.username, raw.caption) ?? null;
+    const id = raw.id ?? known?.id ?? syntheticItemId(raw);
+    const domSrc = raw.video?.src && !raw.video.src.startsWith('blob:') ? raw.video.src : null;
+    const src = domSrc ?? known?.playAddr ?? null;
+    const posterSrc = raw.video?.poster ?? known?.cover ?? null;
+    const video = src ? this.register(src, 'video/mp4') : null;
+    const poster = posterSrc ? this.register(posterSrc, 'image/jpeg') : null;
     const avatar = raw.author.avatar ? this.register(raw.author.avatar, 'image/jpeg') : null;
+    const pick = (a: number | null, b: number | null | undefined): number | null => (a ?? b ?? null);
     return {
       id,
       url: raw.href ? absolute(raw.href, this.origin) : `${this.origin}/@${raw.author.username ?? ''}/video/${id}`,
       author: { username: raw.author.username, name: raw.author.name, avatar },
-      caption: raw.caption,
-      music: raw.music,
-      stats: raw.stats,
+      caption: raw.caption ?? known?.desc ?? null,
+      music: raw.music ?? known?.music ?? null,
+      stats: {
+        likes: pick(raw.stats.likes, known?.likes),
+        comments: pick(raw.stats.comments, known?.comments),
+        shares: pick(raw.stats.shares, known?.shares),
+        plays: pick(raw.stats.plays, known?.plays),
+      },
       liked: raw.liked,
-      video: raw.video ? { src: video, poster, muted: raw.video.muted, playing: raw.video.playing } : null,
+      video: src || poster ? { src: video, poster, muted: raw.video?.muted ?? false, playing: raw.video?.playing ?? false } : null,
     };
   }
 

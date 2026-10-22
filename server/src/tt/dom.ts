@@ -38,6 +38,7 @@ export interface DomSelectors {
 
 export const DEFAULT_SELECTORS: DomSelectors = {
   threadList: [
+    '[data-e2e="dm-new-conversation-list"]',
     '[data-e2e="conversation-list"]',
     '[data-e2e="chat-list"]',
     '[class*="ConversationList"]',
@@ -46,6 +47,7 @@ export const DEFAULT_SELECTORS: DomSelectors = {
     '[class*="ChatList"]',
   ],
   threadItem: [
+    '[data-e2e="dm-new-conversation-item"]',
     '[data-e2e="conversation-item"]',
     '[data-e2e="chat-item"]',
     'a[href*="/messages/"]',
@@ -54,11 +56,12 @@ export const DEFAULT_SELECTORS: DomSelectors = {
     '[class*="ThreadItem"]',
     'li[role="listitem"]',
   ],
-  threadName: ['[data-e2e="conversation-name"]', '[class*="nickname"]', '[class*="name"]', '[class*="Name"]', 'span', 'p'],
-  threadPreview: ['[data-e2e="conversation-preview"]', '[class*="preview"]', '[class*="Preview"]', '[class*="last"]', '[class*="Last"]'],
-  threadUnread: ['[data-e2e="unread-count"]', '[class*="badge"]', '[class*="Badge"]', '[class*="unread"]', '[class*="Unread"]'],
+  threadName: ['[data-e2e="dm-new-conversation-nickname"]', '[data-e2e="conversation-name"]', '[class*="nickname"]', '[class*="name"]', '[class*="Name"]', 'span', 'p'],
+  threadPreview: ['[class*="SpanInfoExtract"]', '[data-e2e="conversation-preview"]', '[class*="preview"]', '[class*="Preview"]', '[class*="last"]', '[class*="Last"]'],
+  threadUnread: ['[data-e2e="dm-new-unread-count"]', '[data-e2e="unread-count"]', '[class*="badge"]', '[class*="Badge"]', '[class*="unread"]', '[class*="Unread"]'],
   threadAvatar: ['img[src]'],
   messageList: [
+    '[data-e2e="dm-new-message-list"]',
     '[data-e2e="message-list"]',
     '[data-e2e="chat-message-list"]',
     '[class*="MessageList"]',
@@ -67,6 +70,7 @@ export const DEFAULT_SELECTORS: DomSelectors = {
     '[class*="MessageContainer"]',
   ],
   messageRow: [
+    '[data-e2e="dm-new-chat-item"]',
     '[data-e2e="message-item"]',
     '[data-e2e="chat-message"]',
     '[class*="MessageItem"]',
@@ -74,8 +78,8 @@ export const DEFAULT_SELECTORS: DomSelectors = {
     '[class*="message-item"]',
     '[class*="Message"]',
   ],
-  messageText: ['[data-e2e="message-text"]', '[class*="text"]', '[class*="Text"]', '[class*="content"]', '[class*="Content"]'],
-  messageTime: ['time', '[datetime]', '[class*="time"]', '[class*="Time"]', '[class*="timestamp"]'],
+  messageText: ['[data-e2e="dm-new-message-text"]', '[data-e2e="message-text"]', '[class*="text"]', '[class*="Text"]', '[class*="content"]', '[class*="Content"]'],
+  messageTime: ['[data-e2e="dm-new-time-separator"]', 'time', '[datetime]', '[class*="time"]', '[class*="Time"]', '[class*="timestamp"]'],
   composer: [
     '[data-e2e="message-input"]',
     '[data-e2e="chat-input"]',
@@ -121,7 +125,7 @@ const AGENT = String.raw`
   };
 
   const idFrom = (el) => {
-    const direct = attr(el, ['data-message-id', 'data-msg-id', 'data-id', 'data-conversation-id', 'data-thread-id']);
+    const direct = attr(el, ['data-conv-id', 'data-message-id', 'data-msg-id', 'data-id', 'data-conversation-id', 'data-thread-id']);
     if (direct && /^[A-Za-z0-9_:.\-]{4,128}$/.test(direct)) return direct;
     const href = el.querySelector && el.querySelector('a[href*="/messages/"]');
     const h = href ? href.getAttribute('href') : el.getAttribute && el.getAttribute('href');
@@ -328,6 +332,19 @@ const AGENT = String.raw`
     if (!box) return { threadId: threadIdFromUrl(), name: null, rows: [], error: 'no_message_list' };
     const out = [];
     const rows = rowElements(box);
+    // TikTok prints one timestamp per group of messages ("October 19, 2026 12:55") instead of one per message. Walk
+    // the list in DOM order, remember the last separator and give its time to the messages that follow it.
+    const groupTime = new Map();
+    let cursor = null;
+    const sepSels = S.messageTime.join(',');
+    for (const node of Array.from(box.querySelectorAll(sepSels + ', ' + S.messageRow.join(',')))) {
+      if (S.messageTime.some((sel) => { try { return node.matches(sel); } catch (e) { return false; } })) {
+        const t = parseTime(txt(node));
+        if (t) cursor = t;
+      } else if (cursor) {
+        groupTime.set(node, cursor);
+      }
+    }
     rows.forEach((row, i) => {
       const raw = txt(row);
       if (!raw) return;
@@ -361,7 +378,7 @@ const AGENT = String.raw`
         id: id || null,
         text,
         mine: isMine(row, box),
-        ts: rowTime(row),
+        ts: rowTime(row) ?? groupTime.get(row) ?? null,
         media,
         deleted: deleted && !system,
         system,
@@ -378,7 +395,7 @@ const AGENT = String.raw`
     const box = messageContainer();
     if (!box) return null;
     const top = box.getBoundingClientRect().top;
-    const cands = all('h1, h2, h3, header, [class*="Header"], [class*="header"]').filter((el) => {
+    const cands = all('[data-e2e="dm-new-chat-nickname"], h1, h2, h3, header, [class*="Header"], [class*="header"]').filter((el) => {
       if (!vis(el)) return false;
       const r = el.getBoundingClientRect();
       return r.bottom <= top + 8 && r.width > 60 && r.height < 120;

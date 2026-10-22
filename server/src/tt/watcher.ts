@@ -28,6 +28,8 @@ export interface RawBody {
 export interface WatcherHandlers {
   frame(f: RawFrame): void;
   body(b: RawBody): void;
+  /** The For You feed's own JSON (\`/api/recommend/item_list/\`): item ids and the signed video URLs. */
+  feed?(b: RawBody): void;
   /** A top-level navigation of the tab finished (the page is a new document). */
   navigated(url: string): void;
 }
@@ -39,7 +41,7 @@ const MAX_TRACKED = 200;
 export class Watcher {
   private cdp: CDPSession | null = null;
   private readonly sockets = new Map<string, boolean>();
-  private readonly pending = new Map<string, { url: string; status: number; contentType: string }>();
+  private readonly pending = new Map<string, { url: string; status: number; contentType: string; feed?: boolean }>();
   private readonly recentUrls: string[] = [];
   lastFrameAt: number | null = null;
   frames = 0;
@@ -54,6 +56,15 @@ export class Watcher {
     private readonly handlers: WatcherHandlers,
     private readonly extraOrigin: string | null = null,
   ) {}
+
+  private isFeed(raw: string): boolean {
+    try {
+      const u = new URL(raw);
+      return /(^|\.)tiktok\.com$/i.test(u.hostname) && /\/api\/recommend\/item_list\//i.test(u.pathname);
+    } catch {
+      return false;
+    }
+  }
 
   private isIm(raw: string): boolean {
     if (isImUrl(raw)) return true;
@@ -103,9 +114,10 @@ export class Watcher {
         this.handlers.navigated(r.url);
         return;
       }
-      if (!this.isIm(r.url)) return;
+      const feed = this.isFeed(r.url);
+      if (!feed && !this.isIm(r.url)) return;
       if (this.pending.size >= MAX_TRACKED) this.pending.clear();
-      this.pending.set(e.requestId, { url: r.url, status: r.status, contentType: r.mimeType ?? '' });
+      this.pending.set(e.requestId, { url: r.url, status: r.status, contentType: r.mimeType ?? '', feed });
     });
 
     cdp.on('Network.loadingFinished', (e: { requestId: string; encodedDataLength?: number }) => {
@@ -125,7 +137,7 @@ export class Watcher {
     return `s${requestId.slice(-8)}`;
   }
 
-  private async readBody(requestId: string, meta: { url: string; status: number; contentType: string }): Promise<void> {
+  private async readBody(requestId: string, meta: { url: string; status: number; contentType: string; feed?: boolean }): Promise<void> {
     const cdp = this.cdp;
     if (!cdp) return;
     const res = (await cdp.send('Network.getResponseBody', { requestId })) as { body: string; base64Encoded: boolean };
@@ -138,7 +150,12 @@ export class Watcher {
     } catch {
       /* ignore */
     }
-    this.handlers.body({ url: meta.url, status: meta.status, contentType: meta.contentType, body, at: Date.now() });
+    const raw = { url: meta.url, status: meta.status, contentType: meta.contentType, body, at: Date.now() };
+    if (meta.feed) {
+      this.handlers.feed?.(raw);
+      return;
+    }
+    this.handlers.body(raw);
   }
 
   async detach(): Promise<void> {

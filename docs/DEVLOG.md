@@ -1,5 +1,29 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.2.0: the live TikTok DOM (chats and the feed had never actually been read)
+
+The first live session showed both features empty while the browser sat on `tiktok.com/messages`, logged in. Reading
+the real DOM over CDP (the manager relays the browser socket at `/i/<n>/cdp/devtools/browser/<id>`, so a small node
+script can attach to the page and evaluate expressions) gave the actual structure, which none of our guessed selectors
+matched:
+
+- conversation list `[data-e2e="dm-new-conversation-list"]`, rows `dm-new-conversation-item` with the thread id in
+  **`data-conv-id`** (`0:1:<uid>:<cid>` or a bare number), name `dm-new-conversation-nickname`, preview
+  `[class*="SpanInfoExtract"]`; the notifications column uses `inbox-list-item` (do not read that as chats).
+- message list `[data-e2e="dm-new-message-list"]`, rows `dm-new-chat-item`, text `dm-new-message-text`, media as
+  `dm-new-shared-video`/`img`; **one timestamp per group** in `dm-new-time-separator` ("October 19, 2026 12:55"),
+  never per message; the open conversation is the row with `aria-selected="true"` (the URL stays `/messages`).
+- the feed item container is `recommend-list-item-container` **with `data-scroll-index`**, the visible item is the one
+  at `top≈0`; `like-icon`/`like-count`/`comment-icon`/`video-desc` are real; but the item has **no link to its id** and
+  `video.src` is a `blob:` (MSE), so the id and the signed video URL only exist in the page's
+  `/api/recommend/item_list/` JSON.
+
+Fixes: TikTok's selectors first in `dom.ts`; `data-conv-id` in `idFrom`; separator times carried into the messages that
+follow them; the feed tab gets its own watcher and a `FeedCatalog` that ingests `item_list` and matches the visible
+item by author + caption prefix (TikTok truncates it), which supplies the real id, `playAddr` and cover. Tests:
+`feedCatalog.test.ts` (6 cases) plus the existing 134.
+
+
 ## 2026-10-22 — v1.1.3: the TikTok screen's "connection lost" (a rename that only reached one side)
 
 The VNC bridge tunnels to x11vnc with an HTTP `Upgrade` whose name the Go manager compares **exactly**

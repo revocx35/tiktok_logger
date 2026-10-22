@@ -10,7 +10,7 @@ import type { SessionCookie } from './cookies.js';
 import { DEFAULT_SELECTORS, DomAgent, mergeSelectors, type DomSelectors } from './dom.js';
 import type { ChatDriver } from './driver.js';
 import { BrowserDownloader } from './download.js';
-import { FeedService } from './feed.js';
+import { FeedCatalog, FeedService } from './feed.js';
 import { Ingest, MediaSources } from './ingest.js';
 import { lookAtTab, nextLoginStep, setSessionCookies, steerTab } from './loginwatch.js';
 import { MediaQueue } from './media.js';
@@ -67,8 +67,12 @@ export class TtService implements TtController, ChatDriver {
   readonly sender: TtSender;
   readonly sync: Sync;
   readonly feed: FeedService;
+  /** Item ids and signed video URLs captured from the For You page's own JSON. */
+  private readonly feedCatalog = new FeedCatalog();
   /** The For You tab (created on demand, kept for the session; never the messages tab). */
   private feedPageRef: Page | null = null;
+  /** A second watcher for the feed tab: only its \`/api/recommend/item_list/\` answers are wanted. */
+  private feedWatcher: Watcher | null = null;
   private selectors: DomSelectors;
 
   /**
@@ -88,7 +92,7 @@ export class TtService implements TtController, ChatDriver {
     });
     this.ingest = new Ingest(ctx, ctx.events, this.sources, this.media);
     this.sender = new Sender(ctx, this.ingest, this);
-    this.feed = new FeedService(ctx, { feedPage: () => this.feedPage() });
+    this.feed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
     this.sync = new Sync(ctx, {
       threads: () => this.readThreads(),
       openChat: (id) => this.ensureChatOpen(id),
@@ -331,6 +335,8 @@ export class TtService implements TtController, ChatDriver {
       {
         frame: (f) => this.onFrame(f.bytes),
         body: (b) => this.onBody(b.body, b.contentType),
+        // The For You page's own JSON: item ids and the signed video URLs the DOM does not expose.
+        feed: (b) => this.feedCatalog.ingest(b.body),
         navigated: (url) => this.onNavigated(url),
       },
       origin === 'https://www.tiktok.com' ? null : origin,
@@ -441,6 +447,8 @@ export class TtService implements TtController, ChatDriver {
     await this.feed.reset().catch(() => undefined);
     const feedPage = this.feedPageRef;
     this.feedPageRef = null;
+    await this.feedWatcher?.detach().catch(() => undefined);
+    this.feedWatcher = null;
     if (feedPage && !feedPage.isClosed()) await feedPage.close().catch(() => undefined);
     await this.run(async () => {
       await this.watcher?.detach().catch(() => undefined);
@@ -655,6 +663,20 @@ export class TtService implements TtController, ChatDriver {
     page.on('close', () => {
       if (this.feedPageRef === page) this.feedPageRef = null;
     });
+    // The feed tab is its own document: the messages tab's watcher cannot see its responses, so give it one that only
+    // collects the item list (ids + signed video URLs).
+    const feedWatcher = new Watcher(
+      page,
+      {
+        frame: () => undefined,
+        body: () => undefined,
+        navigated: () => undefined,
+        feed: (b) => this.feedCatalog.ingest(b.body),
+      },
+      origin === 'https://www.tiktok.com' ? null : origin,
+    );
+    await feedWatcher.attach().catch(() => undefined);
+    this.feedWatcher = feedWatcher;
     await page.goto(`${origin}/foryou`, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
     return { page, origin };
   }
