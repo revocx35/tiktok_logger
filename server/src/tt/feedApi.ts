@@ -26,6 +26,9 @@ interface RawComment {
   reply_comment?: RawComment[] | null;
 }
 
+/** Like/unlike through the page: the video is put on screen and TikTok's own button is clicked. */
+export type LikeOnPage = (id: string, want: boolean) => Promise<{ liked: boolean }>;
+
 export class ApiFeed implements TtFeed {
   private readonly media = new FeedMedia(PRELOAD_AHEAD, (reason) => {
     const now = Date.now();
@@ -42,6 +45,8 @@ export class ApiFeed implements TtFeed {
     private readonly ctx: AppContext,
     private readonly api: () => WebApi | null,
     private readonly downloader: () => Downloader | null,
+    /** Puts the video on screen in the feed tab and clicks TikTok's own like control (see `like`). */
+    private readonly likeOnPage: LikeOnPage,
     readonly catalog: FeedCatalog = new FeedCatalog(),
   ) {}
 
@@ -220,16 +225,27 @@ export class ApiFeed implements TtFeed {
     return { id: sent.id ?? '' };
   }
 
+  /**
+   * Like/unlike through TikTok's own control, never through the web API.
+   *
+   * `POST /api/commit/item/digg/` answers **403 `Web SDK blocked by Argus TLB Plugin`**: TikTok's SDK stamps
+   * `tt-ticket-guard-*` headers onto the requests it makes itself, and a plain `fetch` from the page does not get them
+   * (measured live 2026-10-23 — every parameter variant answered 403, while one click on the page's like control
+   * answered 200 and moved the count). So the work is delegated to the page: the video is put on screen and its like
+   * button is clicked, and what the page then shows is what is reported back.
+   */
   async like(id: string, want: boolean): Promise<{ liked: boolean }> {
     const c = this.catalog.byIdLookup(id);
     if (c && c.liked === want) return { liked: want };
+    let seen: { liked: boolean };
     try {
-      await this.web().json('POST', '/api/commit/item/digg/', { aweme_id: id, from_page: 'fyp', type: want ? '1' : '0' });
+      seen = await this.likeOnPage(id, want);
     } catch (e) {
-      throw new AppError(502, 'like', e instanceof WebApiError ? `TikTok did not accept the like (${e.message}).` : 'TikTok did not answer the like.');
+      if (e instanceof AppError) throw e;
+      throw new AppError(502, 'like', 'TikTok did not answer the like.');
     }
-    this.catalog.markLiked(id, want);
-    return { liked: want };
+    this.catalog.markLiked(id, seen.liked);
+    return seen;
   }
 
   async comments(id: string): Promise<FeedComment[]> {

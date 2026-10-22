@@ -542,33 +542,65 @@ export class FeedService {
 
   /* ------------------------------------------------------------------ like */
 
-  /** Likes (or un-likes) the video in view. Refuses when the feed moved on to another video. */
-  async like(id: string, want: boolean): Promise<{ liked: boolean }> {
+  /**
+   * A like for an item that may not be anywhere in the page's own list.
+   *
+   * Our feed order comes from the web API; the page's For You order is its own, so an item further ahead is not
+   * reachable by scrolling. When the page does not have it, the video's own page is opened first — there its like
+   * control is by definition on screen — and the normal like runs on top of that.
+   */
+  async likeOnVideo(id: string, want: boolean): Promise<{ liked: boolean }> {
+    // One step of the chain: the navigation and the click must not interleave with another feed call.
     return this.run(async () => {
       const agent = await this.ensureAgent();
-      await this.pin(agent, id);
-      const item = await agent.current().catch(() => null);
-      if (!item) throw new AppError(409, 'feed_moved', 'The feed changed. Reload the video and try again.');
-      if (item.liked === want) {
-        this.catalog?.markLiked(id, item.liked);
-        return { liked: item.liked };
-      }
-      await agent.like();
-      const deadline = Date.now() + 4000;
-      let liked = item.liked;
-      while (Date.now() < deadline) {
-        await sleep(300);
-        const now = await agent.current().catch(() => null);
-        if (!now) continue;
-        liked = now.liked;
-        if (liked === want) {
-          this.catalog?.markLiked(id, liked);
-          return { liked };
-        }
-      }
-      // TikTok may not expose the state; report what we see rather than pretending.
-      return { liked };
+      const rendered = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
+      if (!rendered.ok) await this.openVideo(id);
+      return this.likeNow(id, want);
     });
+  }
+
+  /** Opens `/<author>/video/<id>` in the feed tab (a new document, so the in-page helpers are installed again). */
+  private async openVideo(id: string): Promise<void> {
+    const c = this.catalog?.byIdLookup(id);
+    const agent = await this.ensureAgent();
+    if (!c?.author || !this.page) throw new AppError(409, 'feed_moved', 'That video is not in the feed any more. Swipe to it again.');
+    const url = videoPageUrl(this.origin, c.author, id);
+    if (this.page.url() === url) return; // already there: the like is for the video on screen
+    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
+    await agent.install().catch(() => undefined);
+    await this.waitForItem(15_000);
+  }
+
+  /** Likes (or un-likes) the video in view. Refuses when the feed moved on to another video. */
+  async like(id: string, want: boolean): Promise<{ liked: boolean }> {
+    return this.run(() => this.likeNow(id, want));
+  }
+
+  /** The like itself, run inside the chain ([like] and [likeOnVideo] add it). */
+  private async likeNow(id: string, want: boolean): Promise<{ liked: boolean }> {
+    const agent = await this.ensureAgent();
+    await this.pin(agent, id);
+    const item = await agent.current().catch(() => null);
+    if (!item) throw new AppError(409, 'feed_moved', 'The feed changed. Reload the video and try again.');
+    if (item.liked === want) {
+      this.catalog?.markLiked(id, item.liked);
+      return { liked: item.liked };
+    }
+    await agent.like();
+    const deadline = Date.now() + 4000;
+    let liked = item.liked;
+    while (Date.now() < deadline) {
+      await sleep(300);
+      const now = await agent.current().catch(() => null);
+      if (!now) continue;
+      liked = now.liked;
+      if (liked === want) {
+        this.catalog?.markLiked(id, liked);
+        return { liked };
+      }
+    }
+    // TikTok may not expose the state; report what we see rather than pretending.
+    return { liked };
   }
 
   /* -------------------------------------------------------------- comments */
@@ -715,6 +747,17 @@ function toComment(c: { id: string; author: { username: string | null; name: str
     likes: c.likes,
     replies: (c.replies as Parameters<typeof toComment>[0][]).slice(0, 10).map(toComment),
   };
+}
+
+/**
+ * The video's own page (`https://www.tiktok.com/@author/video/<id>`).
+ *
+ * Used when a like has to be made through TikTok's control but the page's own For You list does not render the item:
+ * on its own page the video is on screen by definition.
+ */
+export function videoPageUrl(origin: string, author: string | null, id: string): string {
+  const base = origin.replace(/\/+$/, '');
+  return author ? `${base}/@${author}/video/${id}` : `${base}/video/${id}`;
 }
 
 function syntheticItemId(raw: RawFeedItem): string {

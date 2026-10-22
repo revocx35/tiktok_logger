@@ -137,7 +137,7 @@ server/src/
     service.ts        the integration: state machine, connect/teardown, loops, protocol vs page path, story timer
     im/               TikTok's IM protocol, run inside the tab: wire.ts (protobuf codec), proto.ts (the messages it
                       needs), transport.ts (fetch/evaluate bridge), engine.ts (import, catch-up, unsend, send, profiles)
-    web/api.ts        TikTok's www web API from the tab (fetch hook signs it): feed, comments, likes, stories
+    web/api.ts        TikTok's www web API from the tab (fetch hook signs it): feed, comments, stories
     feedApi.ts        the feed on top of that web API (list, swipe = index move, media cache); feed.ts/feedAgent.ts
                       are the page-driving fallback
     stories.ts        story logging: stories-bar + batch parsers and StoryLogger (timer, media, retention sweep)
@@ -338,10 +338,22 @@ exactly like insta_logger's in-tab GraphQL; the container has no internet and Ti
 
 ### Feed through the web API (`tt/feedApi.ts`, `tt/web/api.ts`, v1.7+)
 
-When the protocol engine is active the feed, comments and likes use TikTok's web API from the messages tab instead of a feed
-page: `ApiFeed` (item list → `FeedCatalog`, index moves, `digg`, `comment/list`, `comment/publish`) over `WebApi` (the page's
+When the protocol engine is active the feed and its comments use TikTok's web API from the messages tab instead of a feed
+page: `ApiFeed` (item list → `FeedCatalog`, index moves, `comment/list`, `comment/publish`) over `WebApi` (the page's
 own `fetch`, which TikTok's hook signs). `routedFeed` in service.ts sends reads to the page-driving `FeedService` below only
-if the API fails; likes and comments are never retried through the page.
+if the API fails.
+
+**Likes are the one exception: they are made by clicking TikTok's own control, never through the web API** (v1.12.0).
+`POST /api/commit/item/digg/` answers **403 `Web SDK blocked by Argus TLB Plugin`**: TikTok's SDK stamps
+`tt-ticket-guard-*` headers (`client-data`, `public-key`, version) onto the requests it makes itself, and a plain `fetch`
+from the page does not get them — every parameter variant (`aweme_id`, `item_id`, with/without `type`/`from_page`)
+answered 403, while a click on the page's like control answered 200 and moved the count. So `ApiFeed.like` delegates to
+`FeedService.likeOnVideo`, which puts the video on screen and uses `FeedAgent.like`:
+the item is used in place when the page's For You list already renders it, otherwise the feed window opens the video's own
+page (`/@author/video/<id>`, `videoPageUrl`) — our order comes from the API, the page's is its own, so an item further
+ahead cannot be reached by scrolling. Both paths read the state back from `aria-pressed` on the like button and report
+what the page shows, and a 409 (`feed_moved`) from the page reaches the client unchanged. Comments were checked in the
+same pass and are **not** blocked (a publish with a bogus id answers 200 + `status_code`), so they stay on the API.
 
 ### Feed, page-driving fallback (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
 

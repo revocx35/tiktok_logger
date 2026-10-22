@@ -1,5 +1,45 @@
 # DEVLOG — construction notes
 
+## 2026-10-23 — v1.12.0: likes go through TikTok's control again (the digg API is 403 "Argus TLB")
+
+Owner: "liking dosent work it says tiktok refused with http 403".
+
+Reproduced against the live tab with the deployed modules (`WebApi` over the messages page), and TikTok said exactly what
+was wrong:
+
+```
+POST /api/commit/item/digg/?…            -> 403  Web SDK blocked by Argus TLB Plugin
+POST /api/commit/item/digg/?aweme_id=…   -> 403  (same, and with item_id / without type / without from_page)
+```
+
+The `type=1|0` digg call reads like any other `/api/…` request, but TikTok's anti-bot SDK (Argus / "TLB", i.e.
+**ticket guard**) only signs the requests **it** makes: a CDP capture of a real click showed the headers
+`tt-ticket-guard-client-data`, `tt-ticket-guard-public-key`, `tt-ticket-guard-version: 2`,
+`tt-ticket-guard-web-version: 1`, `tt-ticket-guard-iteration-version: 0` and `tt-csrf-token` (from the cookie), and the
+same request answered `200 {"status_code":0,"is_digg":0}`. `web/api.ts` deliberately does not recreate those (signing
+TikTok's requests is the one thing this project never does), so a like must be a **click**.
+
+What a click needs, measured on the live page:
+
+* the control is `[data-e2e="like-icon"]` on the video's own page (and on `/foryou`); `button[data-e2e="likes"]` is a
+  0×0 hidden element elsewhere on the page — selecting it throws "Node is either not clickable";
+* `aria-pressed` is the state (`false` → `true` on a like), and the button's text / `[data-e2e="like-count"]` is the
+  count, so the result can be read back instead of assumed;
+* `el.click()` from page context is enough (unlike the DM composer, which needs trusted input): pressing it flipped
+  `aria-pressed`, moved the count 557 → 558 → 557 and produced `digg 200` both ways;
+* `/@author/video/<id>` is the deterministic place to click: the feed tab's own `/foryou` list is a *different* order
+  from our API catalogue, so an item further ahead is not reachable by scrolling (`FeedAgent.ensureItem` answers
+  `not_rendered`, `pin` then answers 409).
+
+Fix: `ApiFeed.like` delegates to `FeedService.likeOnVideo` — use the page's rendered list when it has the item, otherwise
+`page.goto('/@author/video/<id>')` (a new document, so `agent.install()` runs again), then the existing
+`FeedAgent.like` + `aria-pressed` poll. `videoPageUrl()` builds that URL. The digg call is gone, so nothing can silently
+answer 403 again. `feedApi.test.ts` pins delegation, "already so = no click", "a click TikTok ignored is reported as it
+is", and error mapping (409 passes through, anything else is the route's `like` error).
+
+The same probe showed comments are **not** blocked (`/api/comment/publish/` with a bogus id → 200 + `status_code`), so
+they stay on the web API; only the digg endpoint carries the ticket-guard requirement.
+
 ## 2026-10-22 — v1.11.1: the card's thumb is the author's avatar (that was the drop)
 
 v1.11.0 sent the right message type (8, Video) and still got the link fallback. So the payload itself was next, and the

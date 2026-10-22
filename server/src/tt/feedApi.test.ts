@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppContext } from '../context.js';
+import { AppError } from '../errors.js';
 import { ApiFeed } from './feedApi.js';
+import { videoPageUrl } from './feed.js';
 import type { ShareArgs } from './im/proto.js';
 import { makeCtx } from './testutil.js';
 import { WebApi, WebApiError } from './web/api.js';
@@ -50,13 +52,19 @@ describe('ApiFeed', () => {
   let cleanup: () => Promise<void>;
   let api: ReturnType<typeof fakeApi>;
   let feed: ApiFeed;
+  /** The page path that clicks TikTok's own like control; a like is only as real as what that reports. */
+  let likePage: { calls: { id: string; want: boolean }[]; answer: (id: string, want: boolean) => Promise<{ liked: boolean }> };
 
   beforeEach(async () => {
     const made = await makeCtx();
     ctx = made.ctx;
     cleanup = made.cleanup;
     api = fakeApi();
-    feed = new ApiFeed(ctx, () => api as unknown as WebApi, () => null);
+    likePage = { calls: [], answer: (id2, want) => Promise.resolve({ liked: want }) };
+    feed = new ApiFeed(ctx, () => api as unknown as WebApi, () => null, (vid, want) => {
+      likePage.calls.push({ id: vid, want });
+      return likePage.answer(vid, want);
+    });
   });
   afterEach(async () => {
     await cleanup();
@@ -114,20 +122,34 @@ describe('ApiFeed', () => {
     await expect(feed.step('prev')).rejects.toMatchObject({ code: 'feed_step' });
   });
 
-  it('likes and un-likes through the digg call and remembers it for the next swipe', async () => {
+  it('likes through the page control, never the digg API, and stores what the page shows', async () => {
     await feed.window(3);
-    api.answers.set('/api/commit/item/digg/', () => ({ status_code: 0 }));
     expect(await feed.like(id(2), true)).toEqual({ liked: true });
-    expect(api.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/commit/item/digg/', extra: { aweme_id: id(2), type: '1' } });
+    expect(likePage.calls).toEqual([{ id: id(2), want: true }]);
+    // `POST /api/commit/item/digg/` answers 403 "Web SDK blocked by Argus TLB Plugin" (live, 2026-10-23).
+    expect(api.calls.filter((c) => c.path === '/api/commit/item/digg/')).toHaveLength(0);
     expect((await feed.goto(id(1))).items.find((i) => i.id === id(2))).toMatchObject({ liked: true, stats: { likes: 21 } });
+
     await feed.like(id(2), false);
-    expect(api.calls.at(-1)!.extra.type).toBe('0');
-    const n = api.calls.length;
-    await feed.like(id(2), false); // already so: no request
-    expect(api.calls.length).toBe(n);
-    api.answers.set('/api/commit/item/digg/', () => new WebApiError('rejected', false, 4));
-    await expect(feed.like(id(3), true)).rejects.toMatchObject({ code: 'like' });
+    expect(likePage.calls.at(-1)).toEqual({ id: id(2), want: false });
+    const n = likePage.calls.length;
+    await feed.like(id(2), false); // already so: the page is not touched
+    expect(likePage.calls.length).toBe(n);
+
+    // A click TikTok ignored is reported as it is, not as the like the client asked for.
+    likePage.answer = async () => ({ liked: false });
+    expect(await feed.like(id(3), true)).toEqual({ liked: false });
     expect((await feed.goto(id(3))).items[0]!.liked).toBe(false);
+
+    // The page's own refusal (409) reaches the client unchanged; anything else becomes the route's 'like' error.
+    likePage.answer = async () => {
+      throw new AppError(409, 'feed_moved', 'That video is not in the feed any more.');
+    };
+    await expect(feed.like(id(3), true)).rejects.toMatchObject({ code: 'feed_moved' });
+    likePage.answer = async () => {
+      throw new Error('the page is gone');
+    };
+    await expect(feed.like(id(3), true)).rejects.toMatchObject({ code: 'like' });
   });
 
   it('reads comments with their replies', async () => {
@@ -158,8 +180,16 @@ describe('ApiFeed', () => {
   });
 
   it('is unavailable (not broken) while TikTok is not connected', async () => {
-    const off = new ApiFeed(ctx, () => null, () => null);
+    const off = new ApiFeed(ctx, () => null, () => null, () => Promise.reject(new Error('no page')));
     await expect(off.window()).rejects.toMatchObject({ code: 'unavailable' });
+  });
+});
+
+describe('videoPageUrl', () => {
+  it('builds the video page a like is made on', () => {
+    expect(videoPageUrl('https://www.tiktok.com', 'alice', '760000000000000001')).toBe('https://www.tiktok.com/@alice/video/760000000000000001');
+    expect(videoPageUrl('https://www.tiktok.com/', 'alice', '76')).toBe('https://www.tiktok.com/@alice/video/76');
+    expect(videoPageUrl('http://tiktok.test:8080', null, '76')).toBe('http://tiktok.test:8080/video/76');
   });
 });
 

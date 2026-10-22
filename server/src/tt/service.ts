@@ -109,7 +109,7 @@ export class TtService implements TtController, ChatDriver {
     this.ingest = new Ingest(ctx, ctx.events, this.sources, this.media);
     this.sender = new Sender(ctx, this.ingest, this);
     this.pageFeed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
-    this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef);
+    this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef, (id, want) => this.pageFeed.likeOnVideo(id, want));
     this.stories = new StoryLogger(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
     this.items = new TtItems(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
     this.feed = routedFeed(() => (this.webApiRef ? this.apiFeed : null), this.pageFeed);
