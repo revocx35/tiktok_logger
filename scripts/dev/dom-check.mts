@@ -148,6 +148,12 @@ try {
     check('stats are parsed (1.2K likes, 34K plays)', first?.stats.likes === 1200 && first?.stats.plays === 34000, JSON.stringify(first?.stats));
     check('the like state is read', first?.liked === false);
     check('the video source is read', !!first?.video?.src && /\/media\//.test(first.video.src), JSON.stringify(first?.video));
+    check(
+      'the id and the signed video URL come from the page\'s bundled item struct',
+      first?.id === fake.feed[0]!.id && /^https:\/\/v16\.example\.com\/\d+\.mp4$/.test(first?.details?.playAddr ?? ''),
+      JSON.stringify(first?.details),
+    );
+    check('the bundled item struct carries the cover and the exact stats', !!first?.details?.cover && first?.details?.likes === fake.feed[0]!.likes, JSON.stringify(first?.details));
 
     await agent.step('next');
     await new Promise((r) => setTimeout(r, 400));

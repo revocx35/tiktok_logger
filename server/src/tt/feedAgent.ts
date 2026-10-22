@@ -145,7 +145,7 @@ const AGENT = String.raw`
   let hydrationAt = 0;
   /** id -> item struct, from the page's rehydration JSON (TikTok bundles the feed's items with the document). */
   const hydrationItems = () => {
-    const now = nowMs();
+    const now = Date.now();
     if (hydrationMap && now - hydrationAt < 20_000) return hydrationMap;
     const map = new Map();
     const el = document.querySelector('#__UNIVERSAL_DATA_FOR_REHYDRATION__');

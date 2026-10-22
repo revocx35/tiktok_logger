@@ -152,6 +152,19 @@ export function sampleFeed(): FakeFeedItem[] {
   ];
 }
 
+/** TikTok bundles the feed's item structs with the document; the agent reads ids/video URLs from there. */
+function hydrationJson(): string {
+  const items = sampleFeed().map((f) => ({
+    id: f.id,
+    desc: f.caption,
+    author: { uniqueId: f.username, nickname: f.username },
+    video: { playAddr: `https://v16.example.com/${f.id}.mp4`, cover: `https://p16.example.com/${f.id}.jpg` },
+    music: { title: f.music },
+    stats: { diggCount: f.likes, commentCount: f.comments, shareCount: f.shares, playCount: f.plays },
+  }));
+  return JSON.stringify({ __DEFAULT_SCOPE__: { 'webapp.updated-items': items } });
+}
+
 function feedHtml(): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>For You — TikTok</title>
@@ -183,6 +196,7 @@ function feedHtml(): string {
 </style></head>
 <body>
 <div id="feed"></div>
+<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${hydrationJson()}</script>
 <div class="arrows">
   <button data-e2e="arrow-left" onclick="go(-1)">↑</button>
   <button data-e2e="arrow-right" onclick="go(1)">↓</button>
