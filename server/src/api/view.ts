@@ -243,7 +243,9 @@ export class Presenter {
     };
   }
 
-  chats(rows: ChatListRow[]): ChatSummary[] {
+  chats(all: ChatListRow[]): ChatSummary[] {
+    // Hidden empty chats (see ImEngine.pruneEmptyChats) have nothing to show.
+    const rows = all.filter((r) => !(r.removed_at !== null && r.message_count === 0));
     const lastIds = rows.map((r) => r.lm_id).filter((x): x is string => !!x);
     const lastRows = new Map(this.ctx.repo.getMessagesByIds(lastIds).map((r) => [r.id, r] as const));
     this.preloadContacts([

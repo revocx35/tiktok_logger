@@ -196,8 +196,26 @@ export class ImEngine {
     }
     for (const c of convs) await this.ensureThread(c.id, c, me);
     await this.catchUp('history', COMBO_PAGES_MAX);
+    this.pruneEmptyChats(new Set(convs.map((c) => c.id)));
     this.ctx.repo.setState('im_imported', '1');
     this.flush();
+  }
+
+  /**
+   * The schema-less capture of v1.0–1.5 turned any object with an id in TikTok's answers into a "chat": hundreds of empty
+   * rows named by user ids. A chat with no message that TikTok does not list is hidden (soft: it comes back if a message
+   * ever arrives for it).
+   */
+  pruneEmptyChats(listed: Set<string>): number {
+    let n = 0;
+    const now = Date.now();
+    for (const c of this.ctx.repo.listChats()) {
+      if (c.message_count > 0 || c.removed_at !== null || listed.has(c.id) || this.convs.has(c.id)) continue;
+      this.ctx.repo.markChatRemoved(c.id, now);
+      n++;
+    }
+    if (n) this.ctx.log.info({ hidden: n }, 'hid empty chats that TikTok does not list');
+    return n;
   }
 
   /* ---------------------------------------------------------------- reading */

@@ -225,6 +225,17 @@ describe('ImEngine', () => {
     expect(rows.find((r) => r.id === a)).toMatchObject({ alt_id: '7700000000000000001', deleted_at: null });
   });
 
+  it('hides empty chats TikTok does not list, but never a chat that has messages', async () => {
+    standard();
+    ingest.thread({ id: '7698000000000000123', kind: 'user' });
+    ingest.thread({ id: '7698000000000000124', kind: 'user' });
+    ingest.message({ id: 'srv:keep', threadId: '7698000000000000124', senderId: PEER, fromMe: false, ts: Date.now() - 1000, type: 'text', text: 'x', source: 'dom' }, 'dom');
+    await engine.initialImport(() => undefined);
+    expect(ctx.repo.getChat('7698000000000000123')!.removed_at).not.toBeNull();
+    expect(ctx.repo.getChat('7698000000000000124')!.removed_at).toBeNull();
+    expect(ctx.repo.getChat(CONV)!.removed_at).toBeNull();
+  });
+
   describe('sending', () => {
     const sendOk = (id: string) => new PbWriter().u64(1, 0).message(6, new PbWriter().message(100, new PbWriter().u64(1, BigInt(id)))).build();
 

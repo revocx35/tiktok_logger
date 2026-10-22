@@ -1,5 +1,11 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.6.1: ~800 empty "chats" from the old capture are hidden
+
+Found on the deployment after v1.6.0: 808 chats, 17 with messages. The schema-less reader of v1.0–1.5 made a chat of any object
+with an id in TikTok's answers (user ids, 19 digits). `ImEngine.pruneEmptyChats` soft-removes chats with no messages that TikTok
+does not list; the chat list hides removed chats without messages.
+
 ## 2026-10-22 — v1.6.0: the IM protocol in the tab (no more reading the page)
 
 Owner: "just do what insta_logger does". insta_logger runs Instagram's own requests inside the tab; this is the TikTok
