@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Creates .env with strong random secrets for tiktok_logger.
+#
+#   scripts/setup.sh                                   # interactive (or: bash setup.sh when downloaded standalone)
+#   scripts/setup.sh --site 192.168.1.50               # LAN / IP address (Caddy internal CA)
+#   scripts/setup.sh --site tt.example.com --email me@example.com   # public domain (Let's Encrypt)
+#   scripts/setup.sh --site 192.168.1.50 --http-only  # plain HTTP; your own reverse proxy terminates TLS
+#   options: --https-port 443 --http-port 80 --timezone Europe/Istanbul --env-file .env --force
+set -euo pipefail
+
+# Inside a git checkout: write .env at the repository root (next to docker-compose.yml).
+# Standalone (downloaded next to deploy/docker-compose.yml): write it in the current directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/../docker-compose.yml" && -d "$SCRIPT_DIR/../chromium" ]]; then
+  cd "$SCRIPT_DIR/.."
+  START_CMD="docker compose up -d --build"
+else
+  START_CMD="docker compose up -d"
+fi
+
+SITE="" EMAIL="" HTTPS_PORT="443" HTTP_PORT="80" ENV_FILE=".env" FORCE=0 HTTP_ONLY=0 TIMEZONE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --site) SITE="$2"; shift 2 ;;
+    --email) EMAIL="$2"; shift 2 ;;
+    --https-port) HTTPS_PORT="$2"; shift 2 ;;
+    --http-port) HTTP_PORT="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; shift 2 ;;
+    --timezone) TIMEZONE="$2"; shift 2 ;;
+    --force) FORCE=1; shift ;;
+    --http-only) HTTP_ONLY=1; shift ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -f "$ENV_FILE" && $FORCE -ne 1 ]]; then
+  echo "$ENV_FILE already exists. Refusing to overwrite (it holds your SETUP_TOKEN and control secret)." >&2
+  echo "Delete it or pass --force if you really want new secrets." >&2
+  exit 1
+fi
+
+rand() { # $1 = length, alphanumeric (head closing the pipe early is expected, hence +pipefail)
+  ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1" )
+}
+
+host_timezone() { # the server's time zone name (e.g. Europe/Istanbul), else UTC
+  local tz=""
+  command -v timedatectl >/dev/null 2>&1 && tz="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  [[ -z "$tz" && -f /etc/timezone ]] && tz="$(tr -d ' \n' </etc/timezone)"
+  [[ -z "$tz" && -L /etc/localtime ]] && tz="$(readlink /etc/localtime | sed -n 's#.*/zoneinfo/##p')"
+  echo "${tz:-UTC}"
+}
+
+default_ip() {
+  ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' || true
+}
+
+if [[ -z "$SITE" ]]; then
+  guess="$(default_ip)"
+  read -r -p "Address you will open tiktok_logger at (domain or IP) [${guess:-localhost}]: " SITE
+  SITE="${SITE:-${guess:-localhost}}"
+fi
+SITE="${SITE#http://}"; SITE="${SITE#https://}"; SITE="${SITE%%/*}"
+if [[ ! "$SITE" =~ ^[A-Za-z0-9.-]+$ ]]; then
+  echo "invalid site address: $SITE" >&2; exit 2
+fi
+
+is_ip=0
+[[ "$SITE" =~ ^[0-9]+(\.[0-9]+){3}$ || "$SITE" == "localhost" || "$SITE" != *.* ]] && is_ip=1
+
+if [[ $is_ip -eq 0 && -z "$EMAIL" && -t 0 && $HTTP_ONLY -eq 0 ]]; then
+  read -r -p "E-mail for Let's Encrypt (leave empty to use Caddy's internal CA): " EMAIL
+fi
+if [[ -n "$EMAIL" ]]; then
+  [[ "$EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || { echo "invalid e-mail" >&2; exit 2; }
+  CADDY_TLS="$EMAIL"
+else
+  CADDY_TLS="internal"
+fi
+
+[[ "$HTTPS_PORT" =~ ^[0-9]{1,5}$ && "$HTTP_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "invalid port" >&2; exit 2; }
+TIMEZONE="${TIMEZONE:-$(host_timezone)}"
+[[ "$TIMEZONE" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] || { echo "invalid time zone: $TIMEZONE" >&2; exit 2; }
+ORIGIN="https://${SITE}"
+[[ "$HTTPS_PORT" != "443" ]] && ORIGIN="${ORIGIN}:${HTTPS_PORT}"
+if [[ $HTTP_ONLY -eq 1 ]]; then
+  ORIGIN="http://${SITE}"
+  [[ "$HTTP_PORT" != "80" ]] && ORIGIN="${ORIGIN}:${HTTP_PORT}"
+fi
+
+if [[ $HTTP_ONLY -eq 1 ]]; then
+  MODE_BLOCK="# Plain HTTP: your own reverse proxy terminates TLS and forwards to http://${SITE}:${HTTP_PORT}
+CADDY_CONFIG=Caddyfile.http
+HTTPS_BIND=127.0.0.1
+# Secure cookies automatically when your proxy reports HTTPS (X-Forwarded-Proto: https)
+COOKIE_SECURE=auto
+# Trust X-Forwarded-* through two hops: the bundled Caddy + your reverse proxy
+TRUST_PROXY=2
+# Browser origin(s) are derived from the forwarded Host/Proto. Once your proxy's URL is final you can pin it:
+# PUBLIC_ORIGIN=https://tt.example.com"
+else
+  MODE_BLOCK="# Exact origin your browser uses; requests from any other origin are rejected.
+PUBLIC_ORIGIN=${ORIGIN}"
+fi
+
+SETUP_TOKEN="$(rand 32)"
+CONTROL_SECRET="$(rand 32)"
+
+umask 077
+cat >"$ENV_FILE" <<EOF
+# tiktok_logger configuration — generated $(date -u +%Y-%m-%dT%H:%M:%SZ). Keep this file private (chmod 600).
+
+# --- Network / TLS (used by docker compose + caddy)
+SITE_ADDRESS=${SITE}
+CADDY_TLS=${CADDY_TLS}
+HTTPS_PORT=${HTTPS_PORT}
+HTTP_PORT=${HTTP_PORT}
+${MODE_BLOCK}
+
+# --- Secrets
+# Needed once, on the signup page, to create the first account (the admin).
+SETUP_TOKEN=${SETUP_TOKEN}
+# Shared by the app and chromium containers only: the chromium manager checks a token derived from it for every user's
+# browser. Never shown to anyone, never sent to a browser. (Releases before user management called it VNC_PASSWORD.)
+CONTROL_SECRET=${CONTROL_SECRET}
+
+# --- Users
+# The admin (first account) creates more users in the web UI. Each user has a TikTok login of their own, separate data,
+# separate keys and a separate Chromium. MAX_USERS also sizes the chromium container: about 1.5 GB RAM per active user
+# (raise CHROMIUM_MEM_LIMIT and APP_MEM_LIMIT, see README "Multiple users").
+MAX_USERS=10
+# Ports the admin can give to other users, so they reach tiktok_logger on another port (and domain) than the admin.
+# Published by the caddy container; one range, e.g. 8101-8110.
+EXTRA_PORTS=8101-8110
+# Address those ports are published on. Closed to the network by default; set 0.0.0.0 (or your LAN address) when the
+# reverse proxy that serves those users runs on another host, and firewall the range so only that proxy can reach it.
+EXTRA_BIND=127.0.0.1
+
+# --- Sessions
+SESSION_IDLE_HOURS=8
+SESSION_MAX_DAYS=7
+
+# --- Logging behaviour (defaults; most can be changed later in Settings)
+MEDIA_MAX_MB=100
+HISTORY_PER_CHAT=100
+RECONCILE_MINUTES=10
+LOG_LEVEL=info
+SCREEN=1280x800x24
+# The browser's time zone. Use the one you normally are in: TikTok compares it with your IP address's location.
+TZ=${TIMEZONE}
+EOF
+chmod 600 "$ENV_FILE"
+
+cat <<EOF
+Created $ENV_FILE (mode 600).
+
+  Open:         ${ORIGIN}
+  Setup token:  ${SETUP_TOKEN}
+                (also stored in $ENV_FILE — you need it once, on the signup page)
+
+Next:
+  $START_CMD
+EOF
+if [[ $HTTP_ONLY -eq 1 ]]; then
+  echo
+  echo "HTTP mode: point your reverse proxy at http://${SITE}:${HTTP_PORT} and make it forward"
+  echo "Host, X-Forwarded-For and X-Forwarded-Proto (most proxies do this by default). WebSockets must be allowed."
+  echo "Only your reverse proxy should be able to reach this port."
+elif [[ "$CADDY_TLS" == "internal" ]]; then
+  echo
+  echo "TLS uses Caddy's internal CA: your browser will warn about the certificate the first time."
+  echo "To trust it, export the root cert:  docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt"
+fi

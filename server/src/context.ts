@@ -1,0 +1,135 @@
+import type { TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
+import type { Config } from './config.js';
+import type { SessionCookie } from './tt/cookies.js';
+import { Errors } from './errors.js';
+import { DataWriter } from './crypto/keyring.js';
+import type { Repo } from './db/repo.js';
+import { Throttle } from './auth/throttle.js';
+import type { EventBus } from './events.js';
+import type { Logger } from './log.js';
+import type { SettingsStore } from './settings.js';
+
+/** Sending as the logged-in account (throws AppError: unavailable when TikTok is not connected). */
+export interface TtSender {
+  sendText(chatId: string, text: string, quotedId: string | null): Promise<SendResult>;
+  sendMedia(chatId: string, file: { data: Buffer; mime: string; filename: string | null }, kind: SendMediaKind, quotedId: string | null): Promise<SendResult>;
+  /** An empty emoji removes the owner's reaction ([previous]: the emoji being removed, TikTok needs it). */
+  react(messageId: string, emoji: string, previous?: string | null): Promise<void>;
+  /** Unsend (removes the message for everyone). */
+  unsend(messageId: string): Promise<void>;
+  edit(messageId: string, text: string): Promise<void>;
+  markRead(chatId: string): Promise<void>;
+}
+
+/** Control surface of the TikTok integration, used by the HTTP layer. */
+export interface TtController {
+  status(): TtStatus;
+  /** Idempotent. Starts connecting to Chromium / TikTok. */
+  start(): Promise<void>;
+  /** Reconnects to Chromium and reloads the TikTok tab. */
+  restart(): Promise<void>;
+  /** Logs the TikTok tab out (the owner logs in again on the TikTok screen). */
+  logout(): Promise<void>;
+  /** Logs in with a session (cookies) from the owner's own browser, instead of the login form. */
+  importSession(cookies: SessionCookie[]): Promise<void>;
+  /** Re-queues a media download. Returns false if the message has no retryable media. */
+  retryMedia(messageId: string): boolean;
+  /** Called after all logged data was wiped (drop in-memory caches). */
+  onDataWiped(): void;
+  /** What the capture layer is seeing (counts, recent IM paths) — no content, safe to show in Settings. */
+  diagnostics(): TtDiagnostics;
+  /** A structure outline of the messages page (tags, data-e2e, class name stems only), for selector tuning. */
+  probePage(): Promise<PageProbe | null>;
+  stop(): Promise<void>;
+  readonly sender: TtSender;
+}
+
+export interface TtDiagnostics {
+  state: TtStatus['state'];
+  detail?: string;
+  watcher: { frames: number; bodies: number; lastFrameAt: number | null; sockets: number; recentPaths: string[] };
+  chats: number;
+  messages: number;
+  meId: string | null;
+}
+
+export interface PageProbe {
+  url: string;
+  title: string;
+  nodes: unknown[];
+}
+
+export class AppContext {
+  private writerInstance: DataWriter | null = null;
+  tt: TtController;
+  /** Every registered route (filled by an onRoute hook) — used by the auth coverage test. */
+  readonly routeTable: { method: string; url: string; public: boolean }[] = [];
+  /** Brute-force throttle shared by every credential check. */
+  readonly throttle: Throttle;
+
+  constructor(
+    readonly config: Config,
+    readonly log: Logger,
+    readonly repo: Repo,
+    readonly events: EventBus,
+    readonly settings: SettingsStore,
+    tt?: TtController,
+  ) {
+    this.tt = tt ?? new NullTt();
+    this.throttle = new Throttle(repo);
+  }
+
+  /** The encryptor for new data; null until an owner (and thus a public key) exists. */
+  writer(): DataWriter | null {
+    if (this.writerInstance) return this.writerInstance;
+    const owner = this.repo.getOwner();
+    if (!owner) return null;
+    this.writerInstance = new DataWriter(this.repo, owner.public_key);
+    return this.writerInstance;
+  }
+
+  /** Drops the encryptor after the account's keys were replaced (wipe); the next writer() builds a new one. */
+  resetWriter(): void {
+    this.writerInstance = null;
+  }
+
+  mediaMaxBytes(): number {
+    return this.settings.get().mediaMaxMb * 1024 * 1024;
+  }
+}
+
+const notConnected = async (): Promise<never> => {
+  throw Errors.unavailable('TikTok is not connected.');
+};
+
+export class NullTt implements TtController {
+  private readonly since = Date.now();
+  readonly sender: TtSender = {
+    sendText: notConnected,
+    sendMedia: notConnected,
+    react: notConnected,
+    unsend: notConnected,
+    edit: notConnected,
+    markRead: notConnected,
+  };
+  status(): TtStatus {
+    return { state: 'idle', mediaQueue: 0, since: this.since, sync: null, lastEventAt: null };
+  }
+  async start(): Promise<void> {}
+  async restart(): Promise<void> {}
+  async logout(): Promise<void> {}
+  async importSession(_cookies: SessionCookie[]): Promise<void> {
+    throw Errors.unavailable('TikTok is not enabled.');
+  }
+  retryMedia(): boolean {
+    return false;
+  }
+  onDataWiped(): void {}
+  diagnostics(): TtDiagnostics {
+    return { state: 'idle', watcher: { frames: 0, bodies: 0, lastFrameAt: null, sockets: 0, recentPaths: [] }, chats: 0, messages: 0, meId: null };
+  }
+  async probePage(): Promise<PageProbe | null> {
+    return null;
+  }
+  async stop(): Promise<void> {}
+}

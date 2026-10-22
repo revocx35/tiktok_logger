@@ -1,0 +1,31 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.local.md
+CLAUDE.local.md
+keystore.properties
+*.jks
+*.keystore
+
+# Build output and dependencies
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+web/dist/
+
+# Local data / test leftovers
+data/
+*.db
+*.db-wal
+*.db-shm
+screenshots/
+shots/
+*.log
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

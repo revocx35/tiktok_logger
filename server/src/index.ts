@@ -1,0 +1,56 @@
+import fs from 'node:fs';
+import { createApp } from './app.js';
+import { loadConfig } from './config.js';
+import { createLogger } from './log.js';
+import { TtService } from './tt/service.js';
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const log = createLogger(config.logLevel);
+  fs.mkdirSync(config.mediaDir, { recursive: true, mode: 0o700 });
+
+  if (config.cookieSecure === false) log.warn('COOKIE_SECURE=false — session cookies are sent over plain HTTP. Use only for local development.');
+  if (config.cookieSecure === 'auto') log.info('COOKIE_SECURE=auto — cookies are Secure when requests arrive over HTTPS (external reverse proxy).');
+  if (!config.publicOrigin && !config.socketPath) log.warn('PUBLIC_ORIGIN is not set — Origin checks fall back to the request Host header.');
+  if (config.ttWebOrigin !== 'https://www.tiktok.com') log.warn({ origin: config.ttWebOrigin }, 'TT_WEB_ORIGIN is not TikTok — test setup only.');
+
+  const { app, ctx } = await createApp(config, log, { tt: (c) => new TtService(c) });
+
+  // Periodic cleanup of expired sessions.
+  const sweep = setInterval(() => ctx.repo.deleteExpiredSessions(Date.now(), config.sessionIdleMs), 10 * 60_000);
+  sweep.unref();
+
+  if (config.socketPath) {
+    // Tenant worker behind the gateway: a unix socket inside a directory only the gateway's user can enter.
+    fs.rmSync(config.socketPath, { force: true });
+    await app.listen({ path: config.socketPath });
+    fs.chmodSync(config.socketPath, 0o666);
+  } else {
+    await app.listen({ host: config.host, port: config.port });
+  }
+  if (ctx.repo.hasOwner()) await ctx.tt.start();
+  else log.info('No owner yet — waiting for the account to be created or claimed.');
+
+  let stopping = false;
+  const shutdown = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    log.info({ signal }, 'shutting down');
+    const force = setTimeout(() => process.exit(1), 15_000);
+    force.unref();
+    try {
+      await app.close();
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('unhandledRejection', (err) => log.error({ err }, 'unhandled rejection'));
+}
+
+main().catch((err: unknown) => {
+  // Config errors are safe to print; they never contain secret values.
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+});
