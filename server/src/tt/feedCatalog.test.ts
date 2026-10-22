@@ -37,11 +37,15 @@ describe('FeedCatalog', () => {
     expect(c.find('ayse', 'a long caption that TikTok cuts off in the…')?.id).toBe('7412345678901234568');
   });
 
-  it('ignores an item of another author and does not guess', () => {
+  it('never pairs an author with someone else’s caption, and does not guess from an author alone', () => {
     const c = new FeedCatalog();
     c.ingest(body([item('7412345678901234569', 'someone.else', 'hello')]));
-    expect(c.find('ali.veli', 'hello')).toBeNull();
+    // different author, different caption: nothing to match
     expect(c.find('ali.veli', 'a caption nobody posted')).toBeNull();
+    // the caption matches but the author does not: the caption is unique enough to win (2 points)
+    expect(c.find('ali.veli', 'hello')?.id).toBe('7412345678901234569');
+    // the author matches but the caption does not: too weak on its own
+    expect(c.find('someone.else', 'unrelated caption text')).toBeNull();
   });
 
   it('keeps the later of two items with the same caption (the feed moved on)', () => {

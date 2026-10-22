@@ -102,20 +102,34 @@ export class FeedCatalog {
     }
   }
 
-  /** The item on screen: same author, and one caption is the start of the other (TikTok truncates the DOM text). */
+  /**
+   * The item on screen. TikTok truncates the caption in the DOM and loads the list in several batches, so exact pairs
+   * are rare: score every candidate (author +3, caption prefix +2, either alone is not enough on its own — a bare
+   * author match would pick the author's newest video even when another one is on screen) and take the best, latest.
+   */
   find(author: string | null, caption: string | null): CatalogItem | null {
     const a = norm(author);
     const c = norm(caption).replace(/\.\.\.$/, '');
+    if (!a && !c) return null;
     let best: CatalogItem | null = null;
+    let bestScore = 0;
+    let bestHasCaption = false;
     for (const id of this.order) {
       const it = this.byId.get(id);
       if (!it) continue;
-      if (a && norm(it.author) !== a) continue;
+      const sameAuthor = !!a && norm(it.author) === a;
       const d = norm(it.desc).replace(/\.\.\.$/, '');
-      if (c && d && !(d.startsWith(c.slice(0, 40)) || c.startsWith(d.slice(0, 40)))) continue;
-      best = it;
+      const sameCaption = !!c && !!d && (d.startsWith(c.slice(0, 40)) || c.startsWith(d.slice(0, 40)));
+      const score = (sameAuthor ? 3 : 0) + (sameCaption ? 2 : 0);
+      // Equal scores keep the later item: the feed moved on, and the same caption from one author is the same video.
+      if (score > bestScore || (score === bestScore && score > 0)) {
+        bestScore = score;
+        best = it;
+        bestHasCaption = sameCaption;
+      }
     }
-    return best;
+    // Only a caption match is trusted (with or without the author); an author alone would pick their newest video.
+    return best && bestHasCaption ? best : null;
   }
 }
 
