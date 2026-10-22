@@ -395,16 +395,30 @@ describe('send content: replies and shared posts', () => {
       text: '',
       clientMessageId: 'c-2',
       publicKeyB64: 'pk',
-      share: { itemId: '7412345678901234567', uid: '7412345678900000001', secUid: 'MS4wLj', title: 'a video', cover: { uri: 'tos-key', urls: ['https://p16.example.com/c.jpg'] } },
+      share: {
+        itemId: '7412345678901234567',
+        uid: '7412345678900000001',
+        secUid: 'MS4wLj',
+        name: 'someone',
+        title: 'a video',
+        cover: { uri: 'tos-key', urls: ['https://p16.example.com/c.jpg'] },
+        thumb: { uri: 'tos-thumb', urls: ['https://p16.example.com/t.jpg'] },
+        width: 1080,
+        height: 1920,
+      },
     });
     const send = sub(sub(readFields(body), 8)!, 100)!;
     expect(JSON.parse(str(send, 4))).toEqual({
       aweType: 800,
-      itemId: '7412345678901234567',
       uid: '7412345678900000001',
+      itemId: '7412345678901234567',
       sec_uid: 'MS4wLj',
-      content_title: 'a video',
       cover_url: { uri: 'tos-key', url_list: ['https://p16.example.com/c.jpg'] },
+      content_thumb: { uri: 'tos-thumb', url_list: ['https://p16.example.com/t.jpg'] },
+      content_name: 'someone',
+      content_title: 'a video',
+      cover_width: 1080,
+      cover_height: 1920,
     });
   });
 

@@ -207,8 +207,11 @@ export class ApiFeed implements TtFeed {
       itemId: item.id,
       uid: item.authorId,
       ...(item.authorSecUid ? { secUid: item.authorSecUid } : {}),
+      ...(item.authorName ? { name: item.authorName } : {}),
       ...(item.desc ? { title: item.desc.slice(0, 120) } : {}),
-      ...(item.cover ? { cover: { urls: [item.cover] } } : {}),
+      ...(item.cover ? { cover: { urls: [item.cover] }, thumb: { urls: [item.cover] } } : {}),
+      ...(item.videoWidth ? { width: item.videoWidth } : {}),
+      ...(item.videoHeight ? { height: item.videoHeight } : {}),
     });
     return { id: sent.id ?? '' };
   }

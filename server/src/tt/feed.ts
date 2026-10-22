@@ -48,6 +48,9 @@ export interface CatalogItem {
   /** The author's numeric id and secUid: a shared post card needs both to render on the other side. */
   authorId: string | null;
   authorSecUid: string | null;
+  /** The post's pixel size (a share card carries it). */
+  videoWidth: number | null;
+  videoHeight: number | null;
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -117,7 +120,7 @@ export class FeedCatalog {
         desc?: unknown;
         author?: { uniqueId?: unknown; nickname?: unknown; avatarThumb?: unknown; avatarMedium?: unknown; id?: unknown; secUid?: unknown };
         digged?: unknown;
-        video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown };
+        video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown; width?: unknown; height?: unknown };
         music?: { title?: unknown };
         stats?: { diggCount?: unknown; commentCount?: unknown; shareCount?: unknown; playCount?: unknown };
       };
@@ -139,6 +142,8 @@ export class FeedCatalog {
         authorName: typeof it.author?.nickname === 'string' ? it.author.nickname : null,
         authorId: typeof it.author?.id === 'string' ? it.author.id : null,
         authorSecUid: typeof it.author?.secUid === 'string' ? it.author.secUid : null,
+        videoWidth: num(v.width) ?? null,
+        videoHeight: num(v.height) ?? null,
         avatar: str(it.author?.avatarThumb) ?? str(it.author?.avatarMedium),
         liked: typeof it.digged === 'boolean' ? it.digged : null,
       };
@@ -524,8 +529,11 @@ export class FeedService {
       itemId: item.id,
       uid: item.authorId,
       ...(item.authorSecUid ? { secUid: item.authorSecUid } : {}),
+      ...(item.authorName ? { name: item.authorName } : {}),
       ...(item.desc ? { title: item.desc.slice(0, 120) } : {}),
-      ...(item.cover ? { cover: { urls: [item.cover] } } : {}),
+      ...(item.cover ? { cover: { urls: [item.cover] }, thumb: { urls: [item.cover] } } : {}),
+      ...(item.videoWidth ? { width: item.videoWidth } : {}),
+      ...(item.videoHeight ? { height: item.videoHeight } : {}),
     });
     return { id: sent.id ?? '' };
   }

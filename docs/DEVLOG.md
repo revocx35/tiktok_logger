@@ -22,8 +22,9 @@ captured traffic (`/root/ref/matrix-tiktok` on CT 105, `proto/tiktok/im/v1/im.pr
   which is why a shared video showed up as a plain link.
 
 One live discovery, after the first deploy: the share request answered 200 with status 0 and then **nothing appeared** —
-TikTok's own cards carry `cover_url` as an **object** (`{uri, url_list}`, the storage key plus signed links), not a
-string; a string is accepted and silently dropped. The builder now sends the object form (and the same was true for the
+TikTok's own cards carry `cover_url` **and** `content_thumb` as objects (`{uri, url_list}`), plus `content_name`,
+`content_title`, `cover_width` and `cover_height` — a body with fewer fields is accepted with status 0 and then never
+stored. All of them are sent now (`ShareArgs`). The builder now sends the object form (and the same was true for the
 reaction: `action_flag` must be **2 in a group**, 1 in a direct chat — with 1 a group answered status 500).
 
 Remaining parity gaps, deliberately: media *uploads* still go through the page's file input (the protocol needs the

@@ -4,6 +4,7 @@ import { AppError, Errors } from '../errors.js';
 import type { ChatDriver } from './driver.js';
 import { beginMediaFile, finishMediaFile } from './media.js';
 import { ImSendError } from './im/engine.js';
+import type { ShareArgs } from './im/proto.js';
 import type { Ingest } from './ingest.js';
 import type { TtMessage } from './types.js';
 
@@ -148,7 +149,7 @@ export class Sender implements TtSender {
   }
 
   /** Shares a TikTok post into a conversation as a card (the way TikTok's own share works). */
-  async sendShare(chatId: string, share: { itemId: string; uid: string; secUid?: string; title?: string; cover?: { uri?: string; urls: string[] } | null }): Promise<SendResult> {
+  async sendShare(chatId: string, share: ShareArgs): Promise<SendResult> {
     if (!/^\d{6,24}$/.test(share.itemId)) throw Errors.validation('That is not a TikTok post.');
     if (!/^\d{6,24}$/.test(share.uid)) throw Errors.validation('The post\'s author is unknown, so it cannot be shared as a card.');
     const proto = this.driver.protocol();

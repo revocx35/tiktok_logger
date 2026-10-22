@@ -169,7 +169,7 @@ export interface SendArgs {
   /** Answer to another message: aweType 703 plus the reply attachment (field 11). */
   reply?: SendReply | null;
   /** A shared TikTok post instead of text: the card TikTok shows for a video or photo post. */
-  share?: { itemId: string; uid: string; secUid?: string; title?: string; cover?: ShareCover | null } | null;
+  share?: ShareArgs | null;
 }
 
 /** The JSON blob TikTok puts in a reply's reference (refmsg_uid, refmsg_sec_uid, the quoted content). */
@@ -195,18 +195,41 @@ export interface ShareCover {
   urls: string[];
 }
 
+/**
+ * A shared post, as TikTok's client builds it: id and author, a cover and a thumb (both `{uri, url_list}` objects), the
+ * author's name, the caption and the media's pixel size. **All of these are required** — TikTok accepts a body with
+ * fewer fields with status 0 and then never stores the message.
+ */
+export interface ShareArgs {
+  itemId: string;
+  uid: string;
+  secUid?: string;
+  /** The author's nickname (card subtitle). */
+  name?: string;
+  /** The caption (card title). */
+  title?: string;
+  cover?: ShareCover | null;
+  thumb?: ShareCover | null;
+  width?: number | null;
+  height?: number | null;
+}
+
 /** The content JSON of a message: text (optionally a reply) or a shared post. */
 export function sendContent(a: Pick<SendArgs, 'text' | 'reply' | 'share'>): string {
   if (a.share) {
-    const share = {
+    const asObject = (c: ShareCover | null | undefined) => (c && c.urls.length ? { uri: c.uri ?? '', url_list: c.urls } : null);
+    const cover = asObject(a.share.cover);
+    return JSON.stringify({
       aweType: 800,
-      itemId: a.share.itemId,
       uid: a.share.uid,
+      itemId: a.share.itemId,
       ...(a.share.secUid ? { sec_uid: a.share.secUid } : {}),
+      ...(cover ? { cover_url: cover, content_thumb: asObject(a.share.thumb) ?? cover } : {}),
+      ...(a.share.name ? { content_name: a.share.name } : {}),
       ...(a.share.title ? { content_title: a.share.title } : {}),
-      ...(a.share.cover && a.share.cover.urls.length ? { cover_url: { uri: a.share.cover.uri ?? '', url_list: a.share.cover.urls } } : {}),
-    };
-    return JSON.stringify(share);
+      ...(a.share.width ? { cover_width: a.share.width } : {}),
+      ...(a.share.height ? { cover_height: a.share.height } : {}),
+    });
   }
   return JSON.stringify({ aweType: a.reply ? 703 : 0, text: a.text });
 }
