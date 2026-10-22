@@ -58,7 +58,11 @@ export class FeedMedia {
   /** How many downloads are running right now (prefetching a page must not start a stampede). */
   private fetching = 0;
 
-  constructor(private readonly maxConcurrent = 2) {}
+  constructor(
+    private readonly maxConcurrent = 2,
+    /** Called with a short reason (never the URL: it is a signed link) when a download did not work. */
+    private readonly onFail: (reason: string) => void = () => undefined,
+  ) {}
 
   /** The app URL for a CDN link, stable for as long as the link lives. */
   ref(url: string): string {
@@ -126,7 +130,10 @@ export class FeedMedia {
       });
       if (this.cachedBytes + total > CACHE_BYTES) this.evict(total);
       if (this.cache.has(id) || total === 0) return this.cache.get(id) ?? null;
-      if (out.status !== 'ok') return null;
+      if (out.status !== 'ok') {
+        this.onFail(out.status === 'http' ? `http ${out.code}` : out.status === 'error' ? out.reason : out.status);
+        return null;
+      }
       const mime = pickMime(out.mime, url) ?? 'video/mp4';
       const f: Fetched = { mime, data: Buffer.concat(parts, total) };
       this.put(id, f);

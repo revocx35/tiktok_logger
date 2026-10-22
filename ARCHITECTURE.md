@@ -233,24 +233,28 @@ server/src/
 
 ### Feed (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
 
-* **Its own tab.** The feed is opened in a second tab (`/<origin>/foryou`) on first use, so the messages tab keeps its
-  position, its stream socket and its "who is on screen" state. The tab is created, reused and closed with the
-  connection (`TtService.feedPage()`); it never replaces the messages tab.
-* **Reading.** The agent finds the item container/`video` under the middle of the viewport (candidates: TikTok's
-  `data-e2e` names, then layout heuristics), and reads the id from the `/video/<id>` link, the author from the `/@name`
-  link, the caption, the music line and the like/comment/share/play counts (formatted counts like `1.2K` are parsed).
-  The like state comes from the like control's `aria-pressed`/class.
-* **Moving.** Next/previous click TikTok's own arrows; when those are missing it sends the arrow keys to the page. The
-  service waits until the visible item id really changed (the feed animates), then waits for the video element to have
-  a source.
-* **Liking** clicks the like control and polls the page until the state matches what was asked; a feed that moved on
-  (different id on screen) is a 409, never a like on the wrong video.
+* **Its own window.** The feed is opened in a second *window* (`newPage({type:'window'})`, `/<origin>/foryou`) on first use,
+  so the messages tab keeps its position, its stream socket and its "who is on screen" state. It must be a window and not a
+  tab: in one window the tab that is not in front is `visibilityState: hidden`, and a hidden tab never acknowledges
+  `Input.dispatchKeyEvent` — typing a message while the feed was open hung until the feed was closed (v1.4.x bug; the
+  Messages tab was `hidden` while `/foryou` was `visible`). Both pages also run `emulateFocusedPage(true)`.
+* **Where the videos come from.** `FeedCatalog` ingests the page's `/api/recommend/item_list/` answers: id, signed
+  `playAddr`, cover, caption, author card, counts and `digged`, in the order TikTok will show them. `window()`/`goto()` are
+  answered from it (`after(id, n)`), so a swipe does **not** touch TikTok's page; the page is only moved when something has to
+  act on a video (`pin()` walks it with `edge('start'|'end')` until the item is rendered). When fewer than 6 videos follow
+  the one on screen, `extendIfShort()` scrolls the page to its last rendered item, which makes TikTok load the next batch.
+* **Reading the page** (`current()`, only for the first window and for actions): the agent finds the item container under the
+  middle of the viewport; the id is `data-more-menu-item-id`, the author the avatar's `/@name` link, counts are parsed
+  (`1.2K`). The like state comes from the like control's `aria-pressed`/class.
+* **Liking** clicks the like control and polls the page until the state matches (the catalog remembers it: `markLiked`);
+  a feed that cannot be walked to the video is a 409, never a like on the wrong video.
 * **Comments** open TikTok's panel, read the rows (and their replies), and post by filling the box and pressing the
   post control (Enter as a fallback). The service confirms the new comment appears before answering.
-* **Video** is streamed through the browser (`Network.loadNetworkResource`, no cookies) to the client by
-  `/api/feed/media/<ref>`; the ref is a random, short-lived handle (30 min, 64 entries) to the signed CDN URL, so TikTok
-  links never reach the browser. There is no Range support: the whole body is sent and Chrome plays the buffered
-  progressive MP4 (seeking inside what is buffered works; a Range request is refused with 409).
+* **Video** is downloaded once, in the page, with `fetch(url, {credentials:'include'})` in 2 MB ranged pieces
+  (`BrowserDownloader(page, true)`), and cached in memory (320 MB, the next 3 videos are warmed). `Network.loadNetworkResource`
+  has no cookies and TikTok's video CDN answers **403** to it unless the page had loaded that exact URL (HTTP cache) — that
+  was the "video could not be played" / repeated 404s. Only TikTok hosts (`isTikTokCdn`) are fetched with the cookies. The
+  ref is a random handle to the signed URL, so TikTok links never reach the browser. Served with Range support.
 * **Sharing** is the UI sending the canonical `https://www.tiktok.com/@user/video/<id>` into a chat through the normal
   send path — the log then contains it like any other link message.
 * Nothing from the feed is stored; posting a comment adds one audit line (`feed_comment`, no content).

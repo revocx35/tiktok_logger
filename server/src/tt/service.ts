@@ -323,6 +323,8 @@ export class TtService implements TtController, ChatDriver {
     const origin = this.ctx.config.ttWebOrigin;
     await closeOtherTabs(this.browser!, page);
     await page.bringToFront().catch(() => undefined);
+    // The feed lives in another window: this page must keep believing it has the focus (typing, composer blur handlers).
+    await page.emulateFocusedPage(true).catch(() => undefined);
 
     const agent = new DomAgent(page, this.selectors);
     await agent.install();
@@ -678,8 +680,11 @@ export class TtService implements TtController, ChatDriver {
     const origin = this.ctx.config.ttWebOrigin;
     const existing = this.feedPageRef;
     if (existing && !existing.isClosed()) return { page: existing, origin };
-    const page = await this.browser.newPage();
+    // Its own window, not a second tab: in one window the tab that is not in front is `hidden`, and a hidden tab never
+    // acknowledges key events — typing a message while the feed was open hung until the feed was closed.
+    const page = await this.browser.newPage({ type: 'window' });
     this.feedPageRef = page;
+    await page.emulateFocusedPage(true).catch(() => undefined);
     page.on('close', () => {
       if (this.feedPageRef === page) this.feedPageRef = null;
     });

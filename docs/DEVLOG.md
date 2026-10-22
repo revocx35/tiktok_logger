@@ -1,5 +1,28 @@
 # DEVLOG — construction notes
 
+## 2026-10-22 — v1.5.0: sending hung while the feed was open, feed videos 404'd, the feed was laggy
+
+Found by attaching to the live browser on the deployment (CT 124) read-only:
+
+* **Sending hung** (`POST /api/chats/:id/send` never completed). The messages tab and the feed tab shared one window, so
+  with the feed open the Messages tab was `visibilityState: hidden`; Chromium does not ack key events for a hidden tab and
+  puppeteer's `keyboard.type` waits forever. Fix: the feed gets its own **window**; both pages are `visible`
+  (checked live with `Target.createTarget {newWindow:true}`: the other window's tab stays visible) and run
+  `emulateFocusedPage(true)`.
+* **Videos 404'd / "could not be played"**. `Network.loadNetworkResource` has no cookies; the `v16-webapp-prime` CDN answers
+  403 to a URL the page had not loaded itself (the ones it had were served from the HTTP cache, which made the first test
+  look fine). A `fetch(..., {credentials:'include'})` inside the page returns 200/206 in ~0.3 s. The downloader now uses
+  that for the feed (ranged pieces) and falls back to the old loader. Failed downloads are logged with a reason
+  (`feed media download failed`), never with the URL.
+* **Lag**. Every swipe made the server scroll TikTok's real page, wait, and re-read its DOM. The answer is now built from
+  the item list the page already received (`FeedCatalog.after`), so a swipe is a cheap request; the page is only moved for
+  like/comments (`pin()`), and is scrolled to its end in the background when the list runs short.
+* The `service-check` unsent-detection check ("the unsent message is kept and flagged") fails on v1.4.3 as well as here
+  (two messages flagged instead of one) — not caused by this change, still to be looked at.
+
+Not verified live: sending a real message (needs a recipient the owner picks) and the new feed behaviour on the deployment
+(the deploy was held for the owner's go-ahead).
+
 ## 2026-10-22 — v1.2.0: the live TikTok DOM (chats and the feed had never actually been read)
 
 The first live session showed both features empty while the browser sat on `tiktok.com/messages`, logged in. Reading

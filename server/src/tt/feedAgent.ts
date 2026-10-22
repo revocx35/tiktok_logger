@@ -69,7 +69,7 @@ export const DEFAULT_FEED_SELECTORS: FeedSelectors = {
 
 const AGENT = String.raw`
 (() => {
-  if (window.__ttf && window.__ttf.version === 1) return;
+  if (window.__ttf && window.__ttf.version === 2) return;
   const S = __SELECTORS__;
   const vis = (el) => {
     if (!el || !el.getBoundingClientRect) return false;
@@ -365,6 +365,18 @@ const AGENT = String.raw`
     return { ok: true, via: 'keyboard' };
   };
 
+  /**
+   * Scrolls to the first/last item TikTok has rendered. Reaching the end is what makes the page ask for the next batch of
+   * videos; reaching the start brings back an earlier one that a like or a comment wants.
+   */
+  const edge = (dir) => {
+    const items = orderedItems();
+    if (!items.length) return { ok: false, count: 0 };
+    const t = dir === 'end' ? items[items.length - 1] : items[0];
+    t.el.scrollIntoView({ block: 'start', behavior: 'instant' });
+    return { ok: true, count: items.length, index: t.i };
+  };
+
   const like = () => {
     const el = currentEl();
     if (!clickIn(S.likeButton, el || document)) return { ok: false, error: 'no_like_button' };
@@ -482,7 +494,8 @@ const AGENT = String.raw`
   };
 
   window.__ttf = {
-    version: 1,
+    version: 2,
+    edge: (d) => edge(d),
     current: () => current(),
     step: (d) => step(d),
     ensureItem: (id) => ensureItem(id),
@@ -613,6 +626,11 @@ export class FeedAgent {
   /** The next videos in the feed, with the signed URLs the page already knows (used to warm the media cache). */
   queue(limit = 4): Promise<RawQueueItem[]> {
     return this.call('queue', limit);
+  }
+
+  /** Scrolls the page to the first/last video it has rendered (the end makes TikTok load the next batch). */
+  edge(dir: 'start' | 'end'): Promise<{ ok: boolean; count: number; index?: number }> {
+    return this.call('edge', dir);
   }
 
   step(dir: 'next' | 'prev'): Promise<{ ok: boolean; via?: string }> {

@@ -21,6 +21,10 @@ export interface FeedPageProvider {
 
 /** How many videos ahead of the one on screen are downloaded in the background (the apps warm a few as well). */
 const PRELOAD_AHEAD = 3;
+/** How many videos a swipe's answer carries (the one swiped to and the ones after it). */
+const GOTO_ITEMS = 5;
+/** TikTok's list is extended when fewer videos than this follow the one on screen. */
+const AHEAD_MIN = 6;
 
 /**
  * What the For You page's own JSON knows and the DOM does not: the item id (the DOM has no link to it) and the signed
@@ -38,6 +42,9 @@ export interface CatalogItem {
   comments: number | null;
   shares: number | null;
   plays: number | null;
+  authorName: string | null;
+  avatar: string | null;
+  liked: boolean | null;
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -56,6 +63,31 @@ export class FeedCatalog {
     return id ? this.byId.get(id) ?? null : null;
   }
 
+  /** The items TikTok queued after [id], in the order it will show them (empty when [id] is unknown). */
+  after(id: string | null, n: number): CatalogItem[] {
+    const at = id ? this.order.indexOf(id) : -1;
+    if (at < 0) return [];
+    const out: CatalogItem[] = [];
+    for (const k of this.order.slice(at + 1, at + 1 + n)) {
+      const it = this.byId.get(k);
+      if (it) out.push(it);
+    }
+    return out;
+  }
+
+  /** Remembers a like made through the app, so a later swipe's answer does not bring back the old state. */
+  markLiked(id: string, liked: boolean): void {
+    const it = this.byId.get(id);
+    if (!it || it.liked === liked) return;
+    it.liked = liked;
+    if (it.likes !== null) it.likes = Math.max(0, it.likes + (liked ? 1 : -1));
+  }
+
+  /** Position in feed order, or -1. */
+  indexOf(id: string | null): number {
+    return id ? this.order.indexOf(id) : -1;
+  }
+
   ingest(body: Buffer | string): void {
     let data: unknown;
     try {
@@ -70,7 +102,8 @@ export class FeedCatalog {
       const it = raw as {
         id?: unknown;
         desc?: unknown;
-        author?: { uniqueId?: unknown; nickname?: unknown };
+        author?: { uniqueId?: unknown; nickname?: unknown; avatarThumb?: unknown; avatarMedium?: unknown };
+        digged?: unknown;
         video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown };
         music?: { title?: unknown };
         stats?: { diggCount?: unknown; commentCount?: unknown; shareCount?: unknown; playCount?: unknown };
@@ -90,6 +123,9 @@ export class FeedCatalog {
         comments: num(it.stats?.commentCount),
         shares: num(it.stats?.shareCount),
         plays: num(it.stats?.playCount),
+        authorName: typeof it.author?.nickname === 'string' ? it.author.nickname : null,
+        avatar: str(it.author?.avatarThumb) ?? str(it.author?.avatarMedium),
+        liked: typeof it.digged === 'boolean' ? it.digged : null,
       };
       if (!this.byId.has(id)) this.order.push(id);
       this.byId.set(id, entry);
@@ -138,7 +174,15 @@ export class FeedService {
   private downloader: BrowserDownloader | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   // As many parallel downloads as videos we warm, so one page's prefetches are not silently dropped.
-  private readonly media = new FeedMedia(PRELOAD_AHEAD);
+  private readonly media = new FeedMedia(PRELOAD_AHEAD, (reason) => {
+    const now = Date.now();
+    if (now - this.lastMediaWarn < 10_000) return;
+    this.lastMediaWarn = now;
+    this.ctx.log.warn({ reason }, 'feed media download failed');
+  });
+  private lastMediaWarn = 0;
+  private extending: Promise<void> | null = null;
+  private lastExtend = 0;
   private lastId: string | null = null;
 
   constructor(
@@ -177,7 +221,7 @@ export class FeedService {
     if (!got) throw Errors.unavailable('TikTok is not connected. Log in on the TikTok screen first.');
     this.page = got.page;
     this.origin = got.origin;
-    this.downloader = new BrowserDownloader(got.page);
+    this.downloader = new BrowserDownloader(got.page, true, got.origin === 'https://www.tiktok.com' ? undefined : got.origin);
     await this.downloader.attach().catch(() => undefined);
     this.agent = new FeedAgent(got.page, mergeFeedSelectors(this.ctx.config.ttDomSelectors));
     await this.agent.install();
@@ -298,21 +342,53 @@ export class FeedService {
       const raw = await agent.current().catch(() => null);
       const items: FeedItem[] = [];
       if (raw) items.push(this.toItem(raw));
-      const queue = await agent.queue(limit + 2).catch(() => []);
-      for (const q of queue) {
-        if (items.length >= limit) break;
-        if (raw?.id && q.id === raw.id) continue;
-        const item = this.fromQueue(q);
-        if (item && !items.some((i) => i.id === item.id)) items.push(item);
-      }
+      this.addAhead(items, raw?.id ?? null, limit, await agent.queue(limit + 2).catch(() => []));
       void agent.hold().catch(() => undefined);
+      this.lastId = raw?.id ?? this.lastId;
       void this.warmAhead(agent);
+      void this.extendIfShort(agent, raw?.id ?? null);
       return { items, current: raw?.id ?? null };
     });
   }
 
-  /** Brings the video the UI swiped to back on screen (the page may have moved on), then returns a fresh window. */
+  /**
+   * Fills [items] with the videos after [anchor]: TikTok's own item list first (it holds the whole batch, in order, with
+   * the signed URLs), the page's rendered neighbours only when the list does not know the anchor.
+   */
+  private addAhead(items: FeedItem[], anchor: string | null, limit: number, queue: RawQueueItem[]): void {
+    for (const c of this.catalog?.after(anchor, limit + 2) ?? []) {
+      if (items.length >= limit) return;
+      if (!items.some((i) => i.id === c.id)) items.push(this.fromCatalog(c));
+    }
+    if (items.length >= limit) return;
+    for (const q of queue) {
+      if (items.length >= limit) break;
+      if (anchor && q.id === anchor) continue;
+      const item = this.fromQueue(q);
+      if (item && !items.some((i) => i.id === item.id)) items.push(item);
+    }
+  }
+
+  /**
+   * The client swiped to a video. Nothing is done to the remote page: the answer comes from TikTok's item list, so a swipe
+   * costs one cheap request instead of a scroll and a re-read of the page. The page is moved only when something has to
+   * act on that video (like, comments — see [pin]).
+   */
   async goto(id: string): Promise<{ items: FeedItem[]; current: string | null }> {
+    const cat = this.catalog?.byIdLookup(id) ?? null;
+    if (cat) {
+      this.lastId = id;
+      const items: FeedItem[] = [this.fromCatalog(cat)];
+      this.addAhead(items, id, GOTO_ITEMS, []);
+      // Background work never queues behind the user's own actions on the chain.
+      void this.run(async () => {
+        const agent = await this.ensureAgent();
+        await agent.hold().catch(() => undefined);
+        void this.warmAhead(agent);
+        void this.extendIfShort(agent, id);
+      }).catch(() => undefined);
+      return { items, current: id };
+    }
     return this.run(async () => {
       const agent = await this.ensureAgent();
       const res = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
@@ -322,17 +398,48 @@ export class FeedService {
       const raw = await agent.current().catch(() => null);
       const items: FeedItem[] = [];
       if (raw) items.push(this.toItem(raw));
-      const queue = await agent.queue(6).catch(() => []);
-      for (const q of queue) {
-        if (items.length >= 3) break;
-        if (raw?.id && q.id === raw.id) continue;
-        const item = this.fromQueue(q);
-        if (item && !items.some((i) => i.id === item.id)) items.push(item);
-      }
+      this.addAhead(items, raw?.id ?? null, GOTO_ITEMS, await agent.queue(GOTO_ITEMS + 3).catch(() => []));
       this.lastId = raw?.id ?? this.lastId;
       void this.warmAhead(agent);
       return { items, current: raw?.id ?? null };
     });
+  }
+
+  /**
+   * Keeps TikTok's list ahead of the client: when fewer than [AHEAD_MIN] videos follow [anchor] the page is scrolled to
+   * its last rendered video, which is what makes it request the next batch. One at a time, and not more than every 3 s.
+   */
+  private extendIfShort(agent: FeedAgent, anchor: string | null): Promise<void> {
+    if (!this.catalog || this.extending) return this.extending ?? Promise.resolve();
+    if (this.catalog.after(anchor, AHEAD_MIN).length >= AHEAD_MIN) return Promise.resolve();
+    if (Date.now() - this.lastExtend < 3000) return Promise.resolve();
+    this.lastExtend = Date.now();
+    const catalog = this.catalog;
+    this.extending = (async () => {
+      const before = catalog.size;
+      await agent.edge('end').catch(() => undefined);
+      const deadline = Date.now() + 6000;
+      while (Date.now() < deadline && catalog.size === before) await sleep(300);
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        this.extending = null;
+      });
+    return this.extending;
+  }
+
+  /** A feed item built from TikTok's item list (not from the page): the videos ahead of the one in view. */
+  private fromCatalog(c: CatalogItem): FeedItem {
+    return {
+      id: c.id,
+      url: `${this.origin}/@${c.author ?? ''}/video/${c.id}`,
+      author: { username: c.author, name: c.authorName, avatar: c.avatar ? this.media.ref(c.avatar) : null },
+      caption: c.desc,
+      music: c.music,
+      stats: { likes: c.likes, comments: c.comments, shares: c.shares, plays: c.plays },
+      liked: c.liked ?? false,
+      video: c.playAddr || c.cover ? { src: c.playAddr ? this.media.ref(c.playAddr) : null, poster: c.cover ? this.media.ref(c.cover) : null, muted: true, playing: false } : null,
+    };
   }
 
   /** A feed item built from the page's list (not from the video in view): used for the items ahead. */
@@ -376,10 +483,22 @@ export class FeedService {
   private async pin(agent: FeedAgent, id: string | null): Promise<void> {
     const cur = await agent.current().catch(() => null);
     if (!id || !cur?.id || cur.id === id) return;
-    const res = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
-    if (!res.ok) throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
-    await sleep(500);
-    await agent.hold().catch(() => undefined);
+    // The UI may be far from the page now (swipes never move it): walk the page towards the video, a screen of rendered
+    // items at a time, until TikTok has it on screen.
+    const target = this.catalog?.indexOf(id) ?? -1;
+    const here = this.catalog?.indexOf(cur.id) ?? -1;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const res = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
+      if (res.ok) {
+        await sleep(500);
+        await agent.hold().catch(() => undefined);
+        return;
+      }
+      if (target < 0 || here < 0) break;
+      await agent.edge(target > here ? 'end' : 'start').catch(() => undefined);
+      await sleep(450);
+    }
+    throw new AppError(409, 'feed_moved', 'That video is not on screen any more.');
   }
 
   /* ------------------------------------------------------------------ like */
@@ -391,7 +510,10 @@ export class FeedService {
       await this.pin(agent, id);
       const item = await agent.current().catch(() => null);
       if (!item) throw new AppError(409, 'feed_moved', 'The feed changed. Reload the video and try again.');
-      if (item.liked === want) return { liked: item.liked };
+      if (item.liked === want) {
+        this.catalog?.markLiked(id, item.liked);
+        return { liked: item.liked };
+      }
       await agent.like();
       const deadline = Date.now() + 4000;
       let liked = item.liked;
@@ -400,7 +522,10 @@ export class FeedService {
         const now = await agent.current().catch(() => null);
         if (!now) continue;
         liked = now.liked;
-        if (liked === want) return { liked };
+        if (liked === want) {
+          this.catalog?.markLiked(id, liked);
+          return { liked };
+        }
       }
       // TikTok may not expose the state; report what we see rather than pretending.
       return { liked };
@@ -477,24 +602,24 @@ export class FeedService {
     const dl = this.downloader;
     if (!dl) return;
     let warmed = 0;
-    // Two passes: the page adds items to its bundle as it loads, so a second look a moment later usually finds the
-    // videos the first pass could not name yet.
+    const warm = (url: string | null, cover: string | null): void => {
+      if (!url || warmed >= PRELOAD_AHEAD || this.media.cached(refOf(url))) return;
+      this.media.ref(url);
+      this.media.prefetch(url, dl);
+      if (cover) this.media.ref(cover);
+      warmed++;
+    };
+    // TikTok's item list knows every queued video, in order, with its URL: that is the source of truth.
+    for (const c of this.catalog?.after(this.lastId, PRELOAD_AHEAD + 2) ?? []) warm(c.playAddr, c.cover);
+    if (warmed >= PRELOAD_AHEAD) return;
+    // Otherwise the page's own bundle: it adds items as it loads, so a second look a moment later finds more.
     for (let pass = 0; pass < 2 && warmed < PRELOAD_AHEAD; pass++) {
       if (pass) await sleep(1200);
       try {
-        const queue = await agent.queue(PRELOAD_AHEAD + 4);
-        for (const q of queue) {
-          if (warmed >= PRELOAD_AHEAD) break;
-          // The document's own bundle covers the items it shipped with; the captured item list fills in the rest.
+        for (const q of await agent.queue(PRELOAD_AHEAD + 4)) {
+          if (this.lastId && q.id === this.lastId) continue;
           const known = q.playAddr ? null : this.catalog?.byIdLookup(q.id) ?? null;
-          const url = q.playAddr ?? known?.playAddr ?? null;
-          if (!url || (this.lastId && q.id === this.lastId)) continue;
-          if (this.media.cached(refOf(url))) continue;
-          this.media.ref(url);
-          this.media.prefetch(url, dl);
-          const cover = q.cover ?? known?.cover ?? null;
-          if (cover) this.media.ref(cover);
-          warmed++;
+          warm(q.playAddr ?? known?.playAddr ?? null, q.cover ?? known?.cover ?? null);
         }
       } catch {
         return; // warming is best-effort: it must never break the feed

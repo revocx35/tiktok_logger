@@ -79,4 +79,28 @@ describe('FeedCatalog', () => {
     expect(c.find('bulk', 'caption 0')).toBeNull();
     expect(c.find('bulk', 'caption 319')).not.toBeNull();
   });
+
+  it('lists what follows a video in feed order, across batches', () => {
+    const c = new FeedCatalog();
+    c.ingest(body([item('7400000000000000001', 'a', 'one'), item('7400000000000000002', 'b', 'two')]));
+    c.ingest(body([item('7400000000000000003', 'c', 'three'), item('7400000000000000002', 'b', 'two')]));
+    expect(c.after('7400000000000000001', 5).map((x) => x.author)).toEqual(['b', 'c']);
+    expect(c.after('7400000000000000003', 5)).toEqual([]);
+    expect(c.after('7499999999999999999', 5)).toEqual([]);
+    expect(c.after(null, 5)).toEqual([]);
+    expect(c.indexOf('7400000000000000003')).toBe(2);
+  });
+
+  it('keeps the author card and the like state, and remembers a like made through the app', () => {
+    const c = new FeedCatalog();
+    c.ingest(body([item('7400000000000000009', 'z', 'zed', { digged: false, author: { uniqueId: 'z', nickname: 'Zed', avatarThumb: 'https://p16.tiktokcdn.com/z.jpg' } })]));
+    const it1 = c.byIdLookup('7400000000000000009')!;
+    expect(it1.authorName).toBe('Zed');
+    expect(it1.avatar).toBe('https://p16.tiktokcdn.com/z.jpg');
+    expect(it1.liked).toBe(false);
+    c.markLiked('7400000000000000009', true);
+    expect(c.byIdLookup('7400000000000000009')).toMatchObject({ liked: true, likes: 1201 });
+    c.markLiked('7400000000000000009', true);
+    expect(c.byIdLookup('7400000000000000009')?.likes).toBe(1201);
+  });
 });
