@@ -171,7 +171,9 @@ export async function registerStaticUi(app: FastifyInstance, webDir: string | un
         if (filePath.includes(`${path.sep}assets${path.sep}`)) {
           res.header('Cache-Control', 'public, max-age=31536000, immutable');
         } else {
-          res.header('Cache-Control', 'no-cache');
+          // index.html must never be reused from a cache: after an update it points at bundle names that no longer
+          // exist, and a stale copy leaves the browser on the boot splash ("Loading tiktok_logger…") until a hard reload.
+          res.header('Cache-Control', 'no-store');
         }
       },
     });
@@ -182,7 +184,7 @@ export async function registerStaticUi(app: FastifyInstance, webDir: string | un
     if (isApiRequest(req) || req.url.startsWith('/assets/') || req.method !== 'GET' || !indexHtml) {
       return sendError(reply, Errors.notFound('Route'));
     }
-    return reply.code(200).type('text/html; charset=utf-8').header('Cache-Control', 'no-cache').send(indexHtml);
+    return reply.code(200).type('text/html; charset=utf-8').header('Cache-Control', 'no-store').send(indexHtml);
   });
 }
 

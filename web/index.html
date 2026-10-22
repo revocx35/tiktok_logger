@@ -23,5 +23,28 @@
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // After an update the cached index.html can point at a bundle that no longer exists; the module then fails and
+      // the boot splash stays forever. Reload once with a cache-busting query to pick up the current index.html.
+      (function () {
+        var s = document.querySelector('script[type="module"]');
+        if (!s) return;
+        s.addEventListener('error', function () {
+          var u = new URL(location.href);
+          if (u.searchParams.has('boot')) return;
+          u.searchParams.set('boot', Date.now());
+          location.replace(u.toString());
+        });
+        // Belt and braces for browsers that do not fire 'error' on module scripts.
+        setTimeout(function () {
+          if (document.getElementById('root') && document.querySelector('.boot')) {
+            var u = new URL(location.href);
+            if (u.searchParams.has('boot')) return;
+            u.searchParams.set('boot', Date.now());
+            location.replace(u.toString());
+          }
+        }, 8000);
+      })();
+    </script>
   </body>
 </html>
