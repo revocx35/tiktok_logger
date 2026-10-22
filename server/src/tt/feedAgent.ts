@@ -351,12 +351,36 @@ const AGENT = String.raw`
     return { ok: true };
   };
 
-  const commentPanel = () => first(S.commentPanel)[0] || null;
+  const textRows = (panel) => first(S.commentRow, panel).filter((row) => first(S.commentText, row).some((t) => txt(t)));
+
+  /**
+   * The comment panel that holds real comments.
+   *
+   * A panel element can be left in the document after the feed moved on (or while it is still empty), so the panel is
+   * chosen by the number of rows that actually carry text — picking the first element with the right class gave an
+   * empty list on videos whose panel was still loading.
+   */
+  const commentPanel = () => {
+    const found = first(S.commentPanel).filter((p) => {
+      const r = p.getBoundingClientRect();
+      return r.width > 2 && r.height > 2;
+    });
+    if (!found.length) return null;
+    let best = found[0];
+    let bestRows = -1;
+    for (const p of found) {
+      const n = textRows(p).length;
+      if (n > bestRows) { bestRows = n; best = p; }
+    }
+    return best;
+  };
 
   const openComments = () => {
-    if (commentPanel()) return { ok: true, open: true };
+    const panel = commentPanel();
+    // Only trust an open panel when it shows comments: an empty one is either still loading or left over.
+    if (panel && textRows(panel).length > 0) return { ok: true, open: true };
     if (!clickIn(S.commentButton, currentEl() || document)) return { ok: false, error: 'no_comment_button' };
-    return { ok: true, open: false };
+    return { ok: true, open: !!commentPanel() };
   };
 
   const closeComments = () => {
