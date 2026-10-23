@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StoryAccount, StoryAuthor, StoryItem, StoryStatus } from '../../../shared/api';
 import { api, errorMessage } from '../api/client';
 import { Icon } from '../components/Icon';
+import { storyDownloadUrl, storyZipIds } from '../lib/storyDownloads';
 import { Avatar, EmptyState, ErrorNote, Spinner } from '../components/ui';
 
 /**
@@ -60,6 +61,8 @@ export function StoriesPage() {
   };
 
   const chosen = useMemo(() => (author ? authors.find((a) => a.id === author) ?? null : null), [author, authors]);
+  const zipIds = useMemo(() => storyZipIds(items), [items]);
+  const zipCount = zipIds ? zipIds.split(',').length : 0;
 
   if (!loading && status && !status.logging && !items.length) {
     return (
@@ -96,6 +99,11 @@ export function StoriesPage() {
               All accounts
             </button>
           ) : null}
+          {zipIds ? (
+            <a className="btn ghost" href={`/api/media-zip?ids=${zipIds}`} download title="Download every story shown here as one ZIP">
+              <Icon name="download" size={16} /> Download all ({zipCount})
+            </a>
+          ) : null}
           <button className="btn" onClick={() => void check()} disabled={busy}>
             {busy ? <Spinner size={16} /> : <Icon name="refresh" size={16} />} Check now
           </button>
@@ -125,7 +133,8 @@ export function StoriesPage() {
       {items.length ? (
         <div className="story-grid">
           {items.map((s, i) => (
-            <button key={s.id} className="story-tile" onClick={() => setViewer(i)} title={s.username ? `@${s.username}` : s.id}>
+            <div key={s.id} className="story-tile-wrap">
+            <button className="story-tile" onClick={() => setViewer(i)} title={s.username ? `@${s.username}` : s.id}>
               {s.type === 'video' ? (
                 s.url ? (
                   <video src={s.url} muted playsInline preload="metadata" />
@@ -147,6 +156,18 @@ export function StoriesPage() {
               </span>
               {s.status !== 'downloaded' ? <span className="story-tile-badge">{s.status === 'pending' ? 'downloading' : s.status}</span> : null}
             </button>
+            {storyDownloadUrl(s) ? (
+              <a
+                className="story-tile-dl"
+                href={storyDownloadUrl(s)!}
+                download
+                title="Download this story"
+                aria-label={`Download the story of ${s.username ? `@${s.username}` : 'this account'}`}
+              >
+                <Icon name="download" size={16} />
+              </a>
+            ) : null}
+            </div>
           ))}
         </div>
       ) : null}
@@ -205,6 +226,11 @@ function StoryViewer({ items, start, onClose }: { items: StoryItem[]; start: num
         <div className="story-viewer-head">
           <b>@{story.username ?? story.userId.slice(-6)}</b>
           <span className="muted small">{when(story.takenAt)}</span>
+          {storyDownloadUrl(story) ? (
+            <a className="story-viewer-dl" href={storyDownloadUrl(story)!} download title="Download this story">
+              <Icon name="download" size={16} /> Download
+            </a>
+          ) : null}
         </div>
         {story.type === 'video' && story.url ? (
           <video ref={video} key={story.id} src={story.url} autoPlay playsInline controls onEnded={next} />

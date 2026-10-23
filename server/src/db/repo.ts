@@ -506,6 +506,11 @@ export class Repo implements DataKeyStore {
     return this.db.prepare('SELECT * FROM stories WHERE id = ?').get(id) as StoryRow | undefined;
   }
 
+  /** The story a media row belongs to (download file names, ZIP entries). */
+  getStoryByMediaId(mediaId: number): StoryRow | undefined {
+    return this.db.prepare('SELECT * FROM stories WHERE media_id = ? ORDER BY taken_at DESC LIMIT 1').get(mediaId) as StoryRow | undefined;
+  }
+
   /** Stores a story unless it is already known (the same item comes back on every pass until it expires). */
   insertStory(row: Omit<StoryRow, 'attempts' | 'captured_at'> & { capturedAt?: number }): boolean {
     const now = row.capturedAt ?? Date.now();

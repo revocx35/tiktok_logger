@@ -1,5 +1,26 @@
 # DEVLOG — construction notes
 
+## 2026-10-23 — v1.13.0: download buttons for stories
+
+Owner: "can you add a downooad button to the stories so i can download them".
+
+Nothing new was needed in the capture: story media already sits behind the ordinary media route (`/api/media/<id>`,
+decrypted on the fly, with `?download=1` → `Content-Disposition: attachment`). Three gaps closed:
+
+* `/api/media-zip` refused anything that was not message media (`row.kind === 'message' ? getMessageByMediaId : 404`), so
+  "download all" could not work for stories — it now takes story media too and names each entry the same way;
+* a story has no original filename, so a download landed as `media-42.mp4`. `storyFileName()` builds
+  `story_@user_2026-10-23_05-37.jpg` from the author (decrypted) and the story time; the sanitising is tested with a
+  `"../../etc/pa"ss\r\nword` author name;
+* `StoryItem` now carries `mediaId`, so the page can zip what it shows without parsing `/api/media/<n>` out of a URL.
+
+Web: a download pill over each tile (hover on a desktop, always visible where `hover: none`) that is a link *next to* the
+tile's button — not inside it, since a button may not contain a link — plus "Download" in the viewer's head and
+"Download all (n)" in the header, where n counts the stories that actually have a file (a story still downloading is
+skipped). Layout checked in the local vite+puppeteer harness at 1280×900 and 390×844: the pill sits inside the tile
+corner clear of the caption, the viewer's pill ends 12 px short of the close button, and the header buttons wrap instead
+of colliding.
+
 ## 2026-10-23 — v1.12.3: the story schedule was never started on the protocol path (the real "half works")
 
 The actual cause of "story logging half works": `stories.reconfigure()` — the only thing that arms the story timer — was

@@ -28,7 +28,7 @@ and stores it encrypted on your disk. You can also send messages from the web UI
 | Sends | text, photos, videos, audio (from the composer), with "seen" only when you reply (configurable) |
 | Shows | conversation list, chat view with search, an "Unsent" feed, one ZIP per selection of media |
 | Feed | browses TikTok's For You, likes/unlikes, reads and posts comments, sends a video's link into a chat |
-| Stories | logs the 24-hour stories of the accounts you follow (photo and video, encrypted, off by default) |
+| Stories | logs the 24-hour stories of the accounts you follow (photo and video, encrypted, off by default) and downloads them — one story or all of them as a ZIP |
 | Users | admin + up to `MAX_USERS`, each with their own TikTok account, keys and browser; separate ports possible |
 | Logs in | on the built-in screen (noVNC), or by pasting a session from your own browser |
 | Does not | calls, posting videos/going live, following or messaging strangers, or several TikTok accounts in one user |

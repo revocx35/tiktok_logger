@@ -1710,6 +1710,62 @@ label.switch {
   color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
+/* A tile is a button (it opens the viewer) and the download is a link, so the link sits next to it, not inside it. */
+.story-tile-wrap {
+  position: relative;
+  display: block;
+}
+.story-tile-wrap > .story-tile {
+  display: block;
+  width: 100%;
+}
+.story-tile-dl {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.12s ease-out, background 0.12s ease-out;
+}
+.story-tile-wrap:hover .story-tile-dl,
+.story-tile-dl:focus-visible {
+  opacity: 1;
+}
+.story-tile-dl:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+/* On a touch screen there is no hover: keep it visible. */
+@media (hover: none) {
+  .story-tile-dl {
+    opacity: 1;
+  }
+}
+.story-viewer-dl {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+.story-viewer-dl:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
 .story-tile-meta {
   position: absolute;
   left: 0;

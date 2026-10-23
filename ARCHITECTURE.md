@@ -414,7 +414,11 @@ panel with replies and a composer, and a chat picker for "send this video".
 
 Stories (`pages/Stories.tsx`): a row of authors in gradient rings with their story counts, a tile grid (a video frame or
 the photo, a caption and a badge while it downloads), a full-screen 9:16 viewer (bounded by both the screen width and
-92 % of its height) that plays videos, holds photos five seconds and steps with ← / →, and "Check now". Settings →
+92 % of its height) that plays videos, holds photos five seconds and steps with ← / →, and "Check now". Every downloaded
+story has a **download** button (a 30 px pill over the tile, and "Download" in the viewer's head) that is just the media
+route with `?download=1`, plus **Download all** for one ZIP of what is on screen (`/api/media-zip?ids=…`). A story has no
+original filename, so the server names it `story_@user_2026-10-23_05-37.jpg` (`storyFileName()` in `api/media.ts`);
+`/api/media-zip` accepts message and story media alike. Settings →
 Logging also holds the story toggle, interval, retention and the per-account picker. The page's class names are pinned
 to the stylesheet by `pages/storiesCss.test.ts` (see §10).
 

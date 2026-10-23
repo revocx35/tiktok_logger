@@ -76,6 +76,19 @@ export function zipEntryName(msg: Pick<MessageRow, 'type' | 'ts'>, mime: string 
   return `ig_${kind}_${stamp}.${ext}`;
 }
 
+/**
+ * A story's file name: `story_@user_2026-10-23_05-37.jpg`.
+ *
+ * A story has no original filename (TikTok serves it as a URL), so its download used to land as `media-123.mp4`.
+ */
+export function storyFileName(user: string | null, takenAt: number, mime: string | null): string {
+  const base = (mime ?? '').split(';')[0]!.trim().toLowerCase();
+  const ext = EXT[base] ?? 'bin';
+  const who = (user ?? '').replace(/^@/, '').replace(/[^A-Za-z0-9._-]/g, '') || 'unknown';
+  const stamp = new Date(takenAt).toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-');
+  return `story_@${who}_${stamp}.${ext}`;
+}
+
 /** Makes names unique inside one ZIP: "a.jpg", "a (2).jpg", … */
 export function uniqueNames(names: string[]): string[] {
   const seen = new Map<string, number>();
@@ -111,7 +124,8 @@ export function registerMediaRoutes(app: FastifyInstance, ctx: AppContext): void
     for (const id of unique) {
       const row = ctx.repo.getMedia(id);
       const msg = row?.kind === 'message' ? ctx.repo.getMessageByMediaId(id) : undefined;
-      if (!row || !msg) throw Errors.notFound('Media');
+      const story = row?.kind === 'story' ? ctx.repo.getStoryByMediaId(id) : undefined;
+      if (!row || (!msg && !story)) throw Errors.notFound('Media');
       const abs = mediaPath(row);
       let size: number;
       try {
@@ -122,7 +136,14 @@ export function registerMediaRoutes(app: FastifyInstance, ctx: AppContext): void
       total += size;
       const mime = reader.tryText(...F.mediaMime(row.path), row.mime_enc);
       const filename = reader.tryText(...F.mediaFilename(row.path), row.filename_enc);
-      items.push({ row, msg, abs, size, name: zipEntryName(msg, mime, filename) });
+      const name = msg
+        ? zipEntryName(msg, mime, filename)
+        : storyFileName(
+            reader.tryText(...F.storyUsername(story!.user_id), ctx.repo.getStoryUser(story!.user_id)?.username_enc ?? null),
+            story!.taken_at,
+            mime,
+          );
+      items.push({ row, ts: msg ? msg.ts : story!.taken_at, abs, size, name });
     }
     if (total > ZIP_MAX_BYTES) throw Errors.validation('Too large for one download (4 GB). Select fewer files.');
     const names = uniqueNames(items.map((i) => i.name));
@@ -131,7 +152,7 @@ export function registerMediaRoutes(app: FastifyInstance, ctx: AppContext): void
     const length = items.reduce((n, it, i) => n + 30 + 16 + 46 + 2 * Buffer.byteLength(names[i]!, 'utf8') + it.size, 22);
     const entries = items.map((it, i) => ({
       name: names[i]!,
-      mtime: it.msg.ts,
+      mtime: it.ts,
       data: async function* () {
         const media = await openMediaFile(it.abs);
         try {
@@ -158,7 +179,10 @@ export function registerMediaRoutes(app: FastifyInstance, ctx: AppContext): void
     if (!row) throw Errors.notFound('Media');
     const reader = getReader(ctx, req);
     const mime = reader.tryText(...F.mediaMime(row.path), row.mime_enc);
-    const filename = safeFilename(reader.tryText(...F.mediaFilename(row.path), row.filename_enc), `media-${mediaId}`);
+    const story = row.kind === 'story' ? ctx.repo.getStoryByMediaId(mediaId) : undefined;
+    const storyUser = story ? reader.tryText(...F.storyUsername(story.user_id), ctx.repo.getStoryUser(story.user_id)?.username_enc ?? null) : null;
+    const fallback = story ? storyFileName(storyUser, story.taken_at, mime) : `media-${mediaId}`;
+    const filename = safeFilename(reader.tryText(...F.mediaFilename(row.path), row.filename_enc), fallback);
     const abs = mediaPath(row);
 
     let media;

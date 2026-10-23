@@ -86,6 +86,7 @@ export function registerStoryRoutes(app: FastifyInstance, ctx: AppContext): void
         expiresAt: r.expires_at,
         status: r.status,
         url: r.status === 'downloaded' && r.media_id ? `/api/media/${r.media_id}` : null,
+        mediaId: r.status === 'downloaded' ? r.media_id : null,
         mime: media ? reader.tryText(...F.mediaMime(media.path), media.mime_enc) : null,
         likes: r.likes,
         plays: r.plays,

@@ -544,6 +544,8 @@ export interface StoryItem {
   expiresAt: number | null;
   status: StoryMediaStatus;
   url: string | null;
+  /** The logged media id behind [url] (the number in `/api/media/<id>`), for a ZIP download. */
+  mediaId: number | null;
   mime: string | null;
   /** The item's own numbers, when TikTok reported them. */
   likes: number | null;
