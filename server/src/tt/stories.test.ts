@@ -24,12 +24,35 @@ const videoItem = (id: string) => ({
   stats: { diggCount: 7, playCount: 88, commentCount: 0, shareCount: 2, collectCount: 0 },
 });
 
+// The live shape (2026-10-23): `imageURL` is an object with `urlList`, not a string. The string-only fixture here is
+// what let every photo story be dropped in production for a release while the parser "passed".
 const photoItem = (id: string) => ({
   id,
   createTime: 1792638000,
-  imagePost: { images: [{ imageURL: 'https://p16.example.com/small.jpg', imageWidth: 720 }, { imageURL: 'https://p16.example.com/big.jpg', imageWidth: 1080 }] },
+  imagePost: {
+    images: [
+      { imageWidth: 720, imageHeight: 1280, imageURL: { urlList: ['https://p16.example.com/small.jpg'] } },
+      { imageWidth: 1080, imageHeight: 1920, imageURL: { urlList: ['https://p16.example.com/big.jpg', 'https://p19.example.com/big.jpg'] } },
+    ],
+  },
   story: { ExpiredAt: 1792724400000 },
   stats: { diggCount: 1, playCount: 2 },
+});
+
+/** The older `displayImage` shape, still accepted. */
+const legacyPhotoItem = (id: string) => ({
+  id,
+  createTime: 1792638000,
+  imagePost: { images: [{ imageWidth: 640, displayImage: [{ width: 640, urlList: ['https://p16.example.com/legacy.jpg'] }] }] },
+  story: { ExpiredAt: 1792724400000 },
+});
+
+/** A photo story with no gallery link at all: its cover is still the picture. */
+const coverOnlyPhotoItem = (id: string) => ({
+  id,
+  createTime: 1792638000,
+  imagePost: { cover: { imageURL: { urlList: ['https://p16.example.com/cover.jpg'] } }, images: [] },
+  story: { ExpiredAt: 1792724400000 },
 });
 
 const batchAnswer = (authorId: string, items: unknown[]) => ({
@@ -63,12 +86,20 @@ describe('story parsers', () => {
     expect(group!.items[0]!.url).toContain('/video/7412345678901234569.mp4');
   });
 
-  it('reads a photo story: the biggest candidate, and no play address', () => {
+  it('reads a photo story: the biggest candidate from imageURL.urlList, and no play address', () => {
     const [group] = parseBatch(batchAnswer('7569493869424952327', [photoItem('7412345678901234570')]));
     const item = group!.items[0]!;
     expect(item.type).toBe('image');
     expect(item.mime).toBe('image/jpeg');
     expect(item.url).toBe('https://p16.example.com/big.jpg');
+    expect(item.takenAt).toBe(1792638000000);
+  });
+
+  it('reads the older displayImage shape too, and falls back to the cover so a photo story is never dropped', () => {
+    const [legacy] = parseBatch(batchAnswer('7569493869424952327', [legacyPhotoItem('7412345678901234572')]));
+    expect(legacy!.items[0]).toMatchObject({ type: 'image', url: 'https://p16.example.com/legacy.jpg' });
+    const [cover] = parseBatch(batchAnswer('7569493869424952327', [coverOnlyPhotoItem('7412345678901234573')]));
+    expect(cover!.items[0]).toMatchObject({ type: 'image', url: 'https://p16.example.com/cover.jpg' });
   });
 
   it('drops an item that has no media link at all', () => {

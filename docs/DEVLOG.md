@@ -1,5 +1,34 @@
 # DEVLOG — construction notes
 
+## 2026-10-23 — v1.12.1: photo stories were dropped by the parser (so only video stories were logged)
+
+Owner: "the story logging half works some are logged but some arent".
+
+Read-only probe of the live account: the tray listed four authors, the batch answer carried three stories (two videos,
+one photo), and the database held **one** — the photo story's group parsed to zero items while
+`markStoryUserCaptured` still recorded its `LastStoryCreatedAt`, which is exactly what "half works" looks like.
+
+The cause was one field's shape:
+
+```json
+{"id":"7699530832234433799","imagePost":{"images":[{"imageWidth":1440,"imageHeight":2560,
+  "imageURL":{"urlList":["https://p16-common-sign.tiktokcdn.com/…jpeg","https://p19-…"]}}],"cover":{…},"shareCover":{…}}}
+```
+
+`bestImage()` did `str(img.imageURL)`, so an **object** produced nothing, `parseBatch` answered "no media link" and the
+item was skipped without a word. The unit test used the string shape (`imageURL: 'https://…'`), which is why it passed.
+
+Fix: `imageUrl()` accepts a string, `{urlList: [...]}` or `{url_list: [...]}`, the widest image wins, `displayImage[]`
+(the older shape) still works, and `imagePost.cover` is the last resort so a photo story is never dropped for a missing
+gallery link. The test fixture is now the live shape (plus the legacy one and a cover-only case).
+
+Same pass: the `stories checked` log line now carries `perAuthor` (id, item count, `v`/`i` per item type), so the next
+"story X is missing" can be answered from the log — was the author in the bar, what did the batch answer, was the item
+a photo — instead of another round of probing.
+
+Proven against the live answer, without writing anything: the same payload that parsed 2 of 3 items now parses 3 of 3
+(`something_dprk` video, `yoruk1032` video, `farkedersekahrolim10` **image** with a CDN link).
+
 ## 2026-10-23 — v1.12.0: likes go through TikTok's control again (the digg API is 403 "Argus TLB")
 
 Owner: "liking dosent work it says tiktok refused with http 403".

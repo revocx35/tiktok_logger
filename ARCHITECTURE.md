@@ -237,14 +237,19 @@ Off by default (`settings.storyLogging`). Own timer: the first pass three minute
    first page**; without it TikTok answers `400 missing required fields…`), page by page, authors upserted with their
    username/nickname encrypted and their avatar link stored for a later fetch;
 2. items — `GET /api/story/batch/item_list/?authorIds=a,b,c` for up to twenty authors per call (1.2 s apart), each item
-   inserted once by its id (pending) with `taken_at`, `expires_at`, likes and plays;
+   inserted once by its id (pending) with `taken_at`, `expires_at`, likes and plays. A **video** story has
+   `video.playAddr`; a **photo** story has no play address and its pictures are `imagePost.images[].imageURL.urlList[]`
+   — `imageURL` is an **object**, not a string (v1.12.1: treating it as a string dropped every photo story silently,
+   so only video stories were ever logged), with `imagePost.cover` as the last-resort link;
 3. media — for each pending row the pass re-asks the author's batch for the signed link and downloads it through the
    page into the ordinary encrypted media file (`kind = 'story'`), up to `mediaMaxMb`; three attempts, then `failed`;
 4. avatars — a few per pass, refreshed daily;
 5. retention — stories older than `storyRetentionDays` (1–365) are deleted with their files.
 
 A manual check (`POST /api/stories/check`, the Stories page's "Check now") runs even while the schedule is off. Nothing
-is ever marked as seen: the tray read does not open a story in TikTok's sense.
+is ever marked as seen: the tray read does not open a story in TikTok's sense. The `stories checked` log line carries a
+`perAuthor` array (author id, item count, `v`/`i` per item type) so a story that did not arrive can be traced from the
+log instead of guessed at.
 * While logged out: **nothing is attached to the tab.** `lookAtTab()` reads the tab list and the cookie jar over a
   browser-level CDP connection; a session cookie (`sessionid`/`sessionid_ss`/`sid_tt`) plus the tab not being on a
   login/check page is what flips the state to attaching. The tab is pointed at `/login` (TikTok's own pages redirect

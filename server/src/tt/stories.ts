@@ -91,23 +91,42 @@ export function parseTray(json: unknown): TrayPage {
   return { users, cursor: str(root.cursor), hasMore: root.hasMore === true };
 }
 
-/** The biggest of the photo candidates (TikTok serves the same photo in several sizes). */
+/** One link out of a TikTok image field: a plain string, or `{urlList: [...]}` / `{url_list: [...]}`. */
+function imageUrl(v: unknown): string | null {
+  const direct = str(v);
+  if (direct && /^https?:/.test(direct)) return direct;
+  const o = obj(v);
+  for (const key of ['urlList', 'url_list']) {
+    for (const u of arr(o[key])) {
+      const s = str(u);
+      if (s && /^https?:/.test(s)) return s;
+    }
+  }
+  return null;
+}
+
+/**
+ * The biggest of the photo candidates (TikTok serves the same photo in several sizes).
+ *
+ * `images[].imageURL` is an **object** (`{urlList: [ …cdn… ]}`, measured live 2026-10-23), not the string the first
+ * version expected: that made every photo story parse to no link and be skipped silently, so only video stories were
+ * ever logged. `displayImage[]` (the older shape) and `imagePost.cover` are kept as fallbacks.
+ */
 function bestImage(imagePost: Record<string, unknown>): string | null {
   const images = arr(imagePost.images).map(obj);
   const candidates: { url: string; width: number }[] = [];
   for (const img of images) {
-    for (const key of ['imageURL', 'imageUrl']) {
-      const u = str(img[key]);
-      if (u) candidates.push({ url: u, width: num(img.imageWidth) ?? 0 });
-    }
+    const u = imageUrl(img.imageURL) ?? imageUrl(img.imageUrl);
+    if (u) candidates.push({ url: u, width: num(img.imageWidth) ?? 0 });
     for (const d of arr(img.displayImage)) {
-      const o = obj(d);
-      const u = str(o.urlList) ?? str(o.url_list) ?? null;
-      if (u) candidates.push({ url: u, width: num(o.width) ?? 0 });
+      const du = imageUrl(d);
+      if (du) candidates.push({ url: du, width: num(obj(d).width) ?? 0 });
     }
   }
   candidates.sort((a, b) => b.width - a.width);
-  return candidates[0]?.url ?? null;
+  if (candidates[0]?.url) return candidates[0].url;
+  // A photo story with no usable gallery link is still a story: its cover is the same picture.
+  return imageUrl(obj(imagePost.cover).imageURL) ?? imageUrl(imagePost.cover) ?? imageUrl(imagePost.shareCover);
 }
 
 /**
@@ -251,15 +270,20 @@ export class StoryLogger {
       const authors = await this.readTray(api);
       let stored = 0;
       let downloaded = 0;
+      // Per-author counts, so a missing story can be answered from the log instead of guessed at next time.
+      const perAuthor: { id: string; items: number; types: string }[] = [];
       const selected = new Set(this.ctx.settings.get().storySelected);
       const wanted = authors.filter((a) => selected.size === 0 || selected.has(a.id)).slice(0, MAX_AUTHORS_PER_RUN);
       for (let i = 0; i < wanted.length; i += BATCH) {
         const chunk = wanted.slice(i, i + BATCH);
         const reply = await api.json('GET', '/api/story/batch/item_list/', { authorIds: chunk.map((a) => a.id).join(','), cursor: '0' });
         for (const group of parseBatch(reply)) {
+          let n = 0;
           for (const item of group.items) {
             if (this.store(item)) stored++;
+            n++;
           }
+          perAuthor.push({ id: group.authorId, items: n, types: group.items.map((it) => it.type[0]).join('') });
           if (group.lastStoryAt) this.ctx.repo.markStoryUserCaptured(group.authorId, group.lastStoryAt, Date.now());
         }
         await sleep(GAP_MS);
@@ -270,7 +294,7 @@ export class StoryLogger {
       this.lastCheckAt = Date.now();
       this.lastError = null;
       this.lastResult = `${authors.length} author(s) with stories, ${stored} new item(s), ${downloaded} downloaded${swept ? `, ${swept} expired` : ''}.`;
-      this.ctx.log.info({ authors: authors.length, stored, downloaded, swept }, 'stories checked');
+      this.ctx.log.info({ authors: authors.length, stored, downloaded, swept, perAuthor }, 'stories checked');
       return this.status();
     } catch (e) {
       this.lastError = e instanceof Error ? e.message.slice(0, 160) : 'stories check failed';
