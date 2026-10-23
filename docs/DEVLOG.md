@@ -1,5 +1,21 @@
 # DEVLOG — construction notes
 
+## 2026-10-23 — v1.12.2: a story pass can no longer die silently, and it says what it did
+
+Same investigation as v1.12.1, reading the live database: `story_users.updated_at` had not moved for **ten hours** while
+`storyLogging` was on and the interval is 45 minutes — eleven passes that never happened, with nothing in the log. The
+old `checkNow` had two silent exits (a second pass while the first was still running, and `webApiRef` not being up yet)
+and no upper bound: one hung pass left `running = true` until the next container restart, which is indistinguishable
+from a schedule that stopped.
+
+* `stories check started` (info) and `stories check skipped: the previous pass has not finished` (warn, with how long
+  the stuck one has been running) — a missing check is now visible in the log;
+* the pass runs under a ten-minute timeout, so `running` always comes back;
+* `stories checked` carries `perAuthor` (id, items, `v`/`i`).
+
+The lesson is the general one: an "if (busy) return" guard on a scheduled job needs a log line, or a stuck job is
+indistinguishable from a job that never ran.
+
 ## 2026-10-23 — v1.12.1: photo stories were dropped by the parser (so only video stories were logged)
 
 Owner: "the story logging half works some are logged but some arent".

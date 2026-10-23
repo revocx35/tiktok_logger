@@ -33,6 +33,8 @@ const AVATARS_PER_RUN = 4;
 const AVATAR_REFRESH_MS = 24 * 3600_000;
 const GAP_MS = 1200;
 const MAX_ATTEMPTS = 3;
+/** A pass that hangs must not keep the schedule dead until the next restart (10 min is far beyond a normal pass). */
+const PASS_TIMEOUT_MS = 10 * 60_000;
 
 export interface TrayUser {
   id: string;
@@ -182,6 +184,7 @@ export function storyDelay(minutes: number, random: () => number = Math.random):
 export class StoryLogger {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private runningSince: number | null = null;
   private stopped = true;
   lastCheckAt: number | null = null;
   nextCheckAt: number | null = null;
@@ -259,42 +262,20 @@ export class StoryLogger {
       this.lastResult = 'Story logging is off.';
       return this.status();
     }
-    if (this.running) return this.status();
+    if (this.running) {
+      // Say it out loud: a pass that never returns used to look exactly like a schedule that had stopped.
+      this.ctx.log.warn(
+        { runningFor: this.runningSince ? Math.round((Date.now() - this.runningSince) / 1000) : null },
+        'stories check skipped: the previous pass has not finished',
+      );
+      return this.status();
+    }
     this.running = true;
+    this.runningSince = Date.now();
+    this.ctx.log.info({ manual: !!opts.manual }, 'stories check started');
     try {
-      const api = this.deps.api();
-      if (!api) {
-        this.lastError = 'TikTok is not connected.';
-        return this.status();
-      }
-      const authors = await this.readTray(api);
-      let stored = 0;
-      let downloaded = 0;
-      // Per-author counts, so a missing story can be answered from the log instead of guessed at next time.
-      const perAuthor: { id: string; items: number; types: string }[] = [];
-      const selected = new Set(this.ctx.settings.get().storySelected);
-      const wanted = authors.filter((a) => selected.size === 0 || selected.has(a.id)).slice(0, MAX_AUTHORS_PER_RUN);
-      for (let i = 0; i < wanted.length; i += BATCH) {
-        const chunk = wanted.slice(i, i + BATCH);
-        const reply = await api.json('GET', '/api/story/batch/item_list/', { authorIds: chunk.map((a) => a.id).join(','), cursor: '0' });
-        for (const group of parseBatch(reply)) {
-          let n = 0;
-          for (const item of group.items) {
-            if (this.store(item)) stored++;
-            n++;
-          }
-          perAuthor.push({ id: group.authorId, items: n, types: group.items.map((it) => it.type[0]).join('') });
-          if (group.lastStoryAt) this.ctx.repo.markStoryUserCaptured(group.authorId, group.lastStoryAt, Date.now());
-        }
-        await sleep(GAP_MS);
-      }
-      downloaded += await this.fetchMedia(api);
-      await this.fetchAvatars();
-      const swept = await this.sweep();
-      this.lastCheckAt = Date.now();
-      this.lastError = null;
-      this.lastResult = `${authors.length} author(s) with stories, ${stored} new item(s), ${downloaded} downloaded${swept ? `, ${swept} expired` : ''}.`;
-      this.ctx.log.info({ authors: authors.length, stored, downloaded, swept, perAuthor }, 'stories checked');
+      // A pass that hangs can no longer keep `running` true until the next restart: the timer gets control back.
+      await withTimeout(this.pass(), PASS_TIMEOUT_MS, 'the stories pass took longer than 10 minutes');
       return this.status();
     } catch (e) {
       this.lastError = e instanceof Error ? e.message.slice(0, 160) : 'stories check failed';
@@ -302,9 +283,48 @@ export class StoryLogger {
       return this.status();
     } finally {
       this.running = false;
+      this.runningSince = null;
       this.lastCheckAt = this.lastCheckAt ?? Date.now();
       this.reschedule();
     }
+  }
+
+  /** The work of one pass (timed out by [checkNow]). */
+  private async pass(): Promise<void> {
+    const api = this.deps.api();
+    if (!api) {
+      this.lastError = 'TikTok is not connected.';
+      this.ctx.log.warn('stories check skipped: the web API is not up yet');
+      return;
+    }
+    const authors = await this.readTray(api);
+    let stored = 0;
+    let downloaded = 0;
+    // Per-author counts, so a missing story can be answered from the log instead of guessed at next time.
+    const perAuthor: { id: string; items: number; types: string }[] = [];
+    const selected = new Set(this.ctx.settings.get().storySelected);
+    const wanted = authors.filter((a) => selected.size === 0 || selected.has(a.id)).slice(0, MAX_AUTHORS_PER_RUN);
+    for (let i = 0; i < wanted.length; i += BATCH) {
+      const chunk = wanted.slice(i, i + BATCH);
+      const reply = await api.json('GET', '/api/story/batch/item_list/', { authorIds: chunk.map((a) => a.id).join(','), cursor: '0' });
+      for (const group of parseBatch(reply)) {
+        let n = 0;
+        for (const item of group.items) {
+          if (this.store(item)) stored++;
+          n++;
+        }
+        perAuthor.push({ id: group.authorId, items: n, types: group.items.map((it) => it.type[0]).join('') });
+        if (group.lastStoryAt) this.ctx.repo.markStoryUserCaptured(group.authorId, group.lastStoryAt, Date.now());
+      }
+      await sleep(GAP_MS);
+    }
+    downloaded += await this.fetchMedia(api);
+    await this.fetchAvatars();
+    const swept = await this.sweep();
+    this.lastCheckAt = Date.now();
+    this.lastError = null;
+    this.lastResult = `${authors.length} author(s) with stories, ${stored} new item(s), ${downloaded} downloaded${swept ? `, ${swept} expired` : ''}.`;
+    this.ctx.log.info({ authors: authors.length, stored, downloaded, swept, perAuthor }, 'stories checked');
   }
 
   /** The stories bar, page by page (it is a cursor list; the first page still needs `cursor`). */
@@ -453,3 +473,25 @@ export class StoryLogger {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Rejects when [work] has not finished in [ms]. The work itself is not cancelled — it is idempotent (stories are
+ * inserted once by id) — so a late finish is harmless; what matters is that the caller gets control back and the
+ * next pass can be scheduled.
+ */
+export function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    timer.unref?.();
+    work.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(timer);
+        reject(e as Error);
+      },
+    );
+  });
+}

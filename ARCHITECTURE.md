@@ -249,7 +249,9 @@ Off by default (`settings.storyLogging`). Own timer: the first pass three minute
 A manual check (`POST /api/stories/check`, the Stories page's "Check now") runs even while the schedule is off. Nothing
 is ever marked as seen: the tray read does not open a story in TikTok's sense. The `stories checked` log line carries a
 `perAuthor` array (author id, item count, `v`/`i` per item type) so a story that did not arrive can be traced from the
-log instead of guessed at.
+log instead of guessed at. A pass is logged when it starts, a pass that finds the previous one still running logs a
+warning (with its age) instead of returning silently, and the whole pass runs under a ten-minute timeout so a hang can
+never keep the schedule dead until the next restart.
 * While logged out: **nothing is attached to the tab.** `lookAtTab()` reads the tab list and the cookie jar over a
   browser-level CDP connection; a session cookie (`sessionid`/`sessionid_ss`/`sid_tt`) plus the tab not being on a
   login/check page is what flips the state to attaching. The tab is pointed at `/login` (TikTok's own pages redirect

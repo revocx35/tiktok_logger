@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { F } from '../db/repo.js';
 import { makeCtx } from './testutil.js';
-import { StoryLogger, parseBatch, parseTray, storyDelay, type StoryDeps } from './stories.js';
+import { StoryLogger, parseBatch, parseTray, storyDelay, withTimeout, type StoryDeps } from './stories.js';
 import type { WebApi } from './web/api.js';
 
 /**
@@ -105,6 +105,14 @@ describe('story parsers', () => {
   it('drops an item that has no media link at all', () => {
     const [group] = parseBatch(batchAnswer('7569493869424952327', [{ id: '7412345678901234571', createTime: 1, video: {} }]));
     expect(group!.items).toHaveLength(0);
+  });
+
+  it('gives control back when a pass hangs, so the schedule keeps running', async () => {
+    // A pass that never returns used to leave `running` true until the next restart: the schedule looked dead.
+    const hung = new Promise<never>(() => undefined);
+    await expect(withTimeout(hung, 30, 'too slow')).rejects.toThrow(/too slow/);
+    expect(await withTimeout(Promise.resolve('done'), 1000, 'too slow')).toBe('done');
+    await expect(withTimeout(Promise.reject(new Error('boom')), 1000, 'too slow')).rejects.toThrow(/boom/);
   });
 
   it('keeps the delay inside the interval ± a quarter of it', () => {
