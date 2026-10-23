@@ -1,5 +1,21 @@
 # DEVLOG — construction notes
 
+## 2026-10-23 — v1.12.3: the story schedule was never started on the protocol path (the real "half works")
+
+The actual cause of "story logging half works": `stories.reconfigure()` — the only thing that arms the story timer — was
+called in `startLoops`, the **page-driving** loop setup. `goReady` returns from `startProtocolLoops` whenever the IM
+protocol attaches, and that path never called it. Since v1.6 the protocol is the normal case, so the story timer was
+armed only on the rare occasion the protocol failed to attach; with it attached the schedule never ran at all. That is
+why the tables looked like this: three authors and one story from the first hour, then nothing for ten hours while
+`storyLogging` stayed on.
+
+It also explains the "some are logged but some aren't" shape: the first passes (protocol not attached yet, right after the
+session was pasted) logged the video stories, and after that nothing new arrived; the photo-story parser bug (v1.12.1)
+sat on top of that.
+
+Fix: `startProtocolLoops` calls `this.stories.reconfigure()` too, next to `stopLoops()`. A source-level guard,
+`tt/wiring.test.ts`, asserts both loop paths start it — no unit test can see this wiring, and no type error appears.
+
 ## 2026-10-23 — v1.12.2: a story pass can no longer die silently, and it says what it did
 
 Same investigation as v1.12.1, reading the live database: `story_users.updated_at` had not moved for **ten hours** while

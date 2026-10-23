@@ -447,6 +447,10 @@ export class TtService implements TtController, ChatDriver {
   /** The protocol loops: a cheap catch-up every few seconds, the unsend check every `reconcileMinutes`. */
   private startProtocolLoops(gen: number, engine: ImEngine): void {
     this.stopLoops();
+    // Story logging keeps its own timer and only needs the web API, which this path is what provides. It used to be
+    // started only in startLoops (the page path), i.e. only when the protocol failed to attach — so with the protocol
+    // active, which is the normal case, the schedule never ran at all (silently, for hours; v1.12.3).
+    this.stories.reconfigure();
     let failures = 0;
     const poll = async () => {
       if (gen !== this.gen || this.stopped) return;

@@ -230,8 +230,11 @@ stays a plain link. The Android client shows shares as text (it has no card yet)
 
 ### Story logging (`tt/stories.ts`)
 
-Off by default (`settings.storyLogging`). Own timer: the first pass three minutes after a worker becomes ready, then
-`storyIntervalMinutes` (15–240, default 45) ± a quarter of it at random. One pass:
+Off by default (`settings.storyLogging`). Own timer, armed from **both** loop setups — `startProtocolLoops` (the normal,
+IM-protocol path) and `startLoops` (the page-driving fallback): it needs the web API, not the feed page, and for a while
+it was armed only on the fallback path, so the schedule silently never ran (v1.12.3, guarded by `tt/wiring.test.ts`).
+The first pass is three minutes after a worker becomes ready, then `storyIntervalMinutes` (15–240, default 45) ± a
+quarter of it at random. One pass:
 
 1. the stories bar — `GET /api/story/user_list/?count=10&cursor=…` (the `cursor` parameter is **required even on the
    first page**; without it TikTok answers `400 missing required fields…`), page by page, authors upserted with their
