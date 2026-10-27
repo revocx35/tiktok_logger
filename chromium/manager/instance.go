@@ -31,8 +31,12 @@ type Config struct {
 	Height       int
 	MaxInstances int
 	ChromiumBin  string
-	NoSandbox    bool
-	Debug        bool
+	// TimeZone (TZ) goes into every browser's environment. TikTok compares the browser's clock zone with the
+	// location of the exit IP, so a headless-looking UTC browser on a foreign IP is one more thing that does not
+	// add up; empty means "leave it to /etc/localtime".
+	TimeZone  string
+	NoSandbox bool
+	Debug     bool
 }
 
 // Backend is what the HTTP layer needs from the process supervisor (faked in tests).
@@ -354,9 +358,11 @@ func (m *Manager) command(id int, bin string, args, env []string) *exec.Cmd {
 }
 
 // childEnv is built from scratch: nothing of the manager's own environment (the control secret!) reaches a browser.
+// TZ is the one exception, and only because it is not a secret: the browser's clock zone has to match the location of
+// the exit IP, and Chromium otherwise reads /etc/localtime (UTC in the image).
 func (m *Manager) childEnv(id, display int, authFile string) []string {
 	l := m.cfg.Layout
-	return []string{
+	env := []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"HOME=" + l.Home(id),
 		"TMPDIR=" + l.Tmp(id),
@@ -365,6 +371,10 @@ func (m *Manager) childEnv(id, display int, authFile string) []string {
 		"DBUS_SESSION_BUS_ADDRESS=disabled:",
 		"LANG=en_US.UTF-8",
 	}
+	if m.cfg.TimeZone != "" {
+		env = append(env, "TZ="+m.cfg.TimeZone)
+	}
+	return env
 }
 
 // prepareDirs creates the instance's directories, owned by its own unix user and closed to everyone else. The manager

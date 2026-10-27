@@ -595,8 +595,9 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 
 `SITE_ADDRESS`, `CADDY_TLS`, `PUBLIC_ORIGIN`, `SETUP_TOKEN`, `COOKIE_SECURE`, `CADDY_CONFIG`, `HTTP(S)_PORT`,
 `HTTP(S)_BIND`, `TTL_VERSION`, `SESSION_IDLE_HOURS`, `SESSION_MAX_DAYS`, `MEDIA_MAX_MB` (100), `HISTORY_PER_CHAT` (100,
-max 2000), `RECONCILE_MINUTES` (10), `SCREEN`, `LOG_LEVEL`, `TRUST_PROXY`, `TZ`. Multi-user: `CONTROL_SECRET` (app ↔
-chromium; `VNC_PASSWORD` is the fallback), `MAX_USERS` (10), `EXTRA_PORTS` (8101-8110), `EXTRA_BIND` (127.0.0.1),
+max 2000), `RECONCILE_MINUTES` (10), `SCREEN`, `LOG_LEVEL`, `TRUST_PROXY`, `TZ` (an IANA name: it is handed to every
+browser, not just kept in the container — the manager's browser environment is otherwise built from scratch).
+Multi-user: `CONTROL_SECRET` (app ↔ chromium; `VNC_PASSWORD` is the fallback), `MAX_USERS` (10), `EXTRA_PORTS` (8101-8110), `EXTRA_BIND` (127.0.0.1),
 `APP_MEM_LIMIT`, `CHROMIUM_MEM_LIMIT`, `CHROMIUM_SHM`. TikTok: `TT_REQUEST_GAP_MS` (1500), `TT_ENABLED` (tests),
 `TT_WEB_ORIGIN` (only the fake end-to-end test changes it; a startup warning is logged), `TT_DOM_SELECTORS` (extra CSS
 selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent.ts`). Per worker (set by the supervisor): `SOCKET_PATH`,

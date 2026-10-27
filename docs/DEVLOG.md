@@ -1,5 +1,21 @@
 # DEVLOG — construction notes
 
+## 2026-10-27 — v1.13.1: TZ never reached the browser
+
+Routing the VPS browser through a residential proxy made this visible: with `TZ=Asia/Jerusalem` in `.env` and the
+container reporting IST, `Intl.DateTimeFormat().resolvedOptions().timeZone` inside a tab still answered `UTC`.
+
+`childEnv()` builds each browser's environment from scratch (deliberately: the control secret must not leak into a
+page's process tree) and simply did not include `TZ`. Chromium therefore fell back to `/etc/localtime`, which is
+`Etc/UTC` in the image — so the whole "TikTok compares the browser's clock with your IP address" promise in
+`docker-compose.yml`, `README` and ARCHITECTURE §3 was inert, on every deployment, single- or multi-user. Mounting
+the zoneinfo file over `/etc/localtime` does not fix it either: ICU reads the symlink's *name* (`Etc/UTC`) and maps
+the zone from that.
+
+Fix: `Config.TimeZone` from `TZ`, appended to the browser environment (and only to that environment). The value is
+validated as an IANA name in `main.go` — anything else is logged and ignored rather than pasted into a child.
+`TestChildEnvCarriesTheTimeZone` holds both halves: the zone present when configured, no `TZ=` at all when not.
+
 ## 2026-10-23 — v1.13.0: download buttons for stories
 
 Owner: "can you add a downooad button to the stories so i can download them".

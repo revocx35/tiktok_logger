@@ -280,6 +280,20 @@ func TestManagerLimit(t *testing.T) {
 	}
 }
 
+func TestChildEnvCarriesTheTimeZone(t *testing.T) {
+	layout := Layout{DataDir: "/data", RunDir: "/run/ttl", HomeRoot: "/home/chrome", TmpRoot: "/tmp", LegacyUID: 10002}
+	withTZ := strings.Join(NewManager(Config{Layout: layout, TimeZone: "Asia/Jerusalem"}).
+		childEnv(1, 101, "/run/ttl/u1/Xauthority"), " ")
+	if !strings.Contains(withTZ, "TZ=Asia/Jerusalem") {
+		t.Fatalf("the browser environment must carry TZ, got %q", withTZ)
+	}
+	// Without TZ the browser keeps /etc/localtime, and nothing of the manager's own environment leaks.
+	plain := strings.Join(NewManager(Config{Layout: layout}).childEnv(1, 101, "/run/ttl/u1/Xauthority"), " ")
+	if strings.Contains(plain, "TZ=") {
+		t.Fatalf("no TZ expected, got %q", plain)
+	}
+}
+
 func TestPickOnLink(t *testing.T) {
 	mk := func(cidr string) (*net.IPNet, net.IP) {
 		ip, n, _ := net.ParseCIDR(cidr)

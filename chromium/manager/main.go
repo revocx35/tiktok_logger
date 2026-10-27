@@ -16,6 +16,9 @@ import (
 	"time"
 )
 
+// tzRe is an IANA zone name: one or more path components, no spaces, no dots.
+var tzRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]{0,63}(/[A-Za-z0-9_+-]{1,64}){0,3}$`)
+
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -42,6 +45,13 @@ func main() {
 	}
 	w, _ := strconv.Atoi(m[1])
 	h, _ := strconv.Atoi(m[2])
+	// The browser's clock zone: an IANA name such as Europe/Istanbul. Anything else is ignored rather than pasted
+	// into a child's environment.
+	tz := env("TZ", "")
+	if tz != "" && !tzRe.MatchString(tz) {
+		log.Printf("ignoring invalid TZ %q (expected an IANA name such as Europe/Istanbul)", tz)
+		tz = ""
+	}
 
 	mgr := NewManager(Config{
 		Layout: Layout{
@@ -54,6 +64,7 @@ func main() {
 		Width: w, Height: h,
 		MaxInstances: envInt("MAX_INSTANCES", 20),
 		ChromiumBin:  env("CHROMIUM_BIN", "chromium"),
+		TimeZone:     tz,
 		NoSandbox:    os.Getenv("CHROMIUM_NO_SANDBOX") == "1",
 		Debug:        os.Getenv("CHROMIUM_DEBUG") == "1",
 	})
