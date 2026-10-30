@@ -128,6 +128,8 @@ services:
       # The browser's time zone (TikTok compares it with your IP address's location).
       TZ: ${TZ:-UTC}
       BACKEND_PEER: app
+      # Caps Mesa's software WebGL (llvmpipe) per browser; unset = one thread per core, which can eat the whole host.
+      LP_NUM_THREADS: ${LP_NUM_THREADS:-2}
     volumes:
       - chromium_profile:/data
       - type: tmpfs

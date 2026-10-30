@@ -62,11 +62,12 @@ func main() {
 			LegacyUID: envInt("LEGACY_UID", 10002),
 		},
 		Width: w, Height: h,
-		MaxInstances: envInt("MAX_INSTANCES", 20),
-		ChromiumBin:  env("CHROMIUM_BIN", "chromium"),
-		TimeZone:     tz,
-		NoSandbox:    os.Getenv("CHROMIUM_NO_SANDBOX") == "1",
-		Debug:        os.Getenv("CHROMIUM_DEBUG") == "1",
+		MaxInstances:  envInt("MAX_INSTANCES", 20),
+		ChromiumBin:   env("CHROMIUM_BIN", "chromium"),
+		TimeZone:      tz,
+		NoSandbox:     os.Getenv("CHROMIUM_NO_SANDBOX") == "1",
+		Debug:         os.Getenv("CHROMIUM_DEBUG") == "1",
+		SoftGLThreads: min(envInt("LP_NUM_THREADS", 0), 64),
 	})
 	handler := NewHandler(mgr, []byte(secret))
 

@@ -37,6 +37,8 @@ type Config struct {
 	TimeZone  string
 	NoSandbox bool
 	Debug     bool
+	// SoftGLThreads caps Mesa's software renderer (llvmpipe, which draws WebGL) per browser; 0 leaves it at one thread per core.
+	SoftGLThreads int
 }
 
 // Backend is what the HTTP layer needs from the process supervisor (faked in tests).
@@ -373,6 +375,9 @@ func (m *Manager) childEnv(id, display int, authFile string) []string {
 	}
 	if m.cfg.TimeZone != "" {
 		env = append(env, "TZ="+m.cfg.TimeZone)
+	}
+	if m.cfg.SoftGLThreads > 0 {
+		env = append(env, "LP_NUM_THREADS="+strconv.Itoa(m.cfg.SoftGLThreads))
 	}
 	return env
 }

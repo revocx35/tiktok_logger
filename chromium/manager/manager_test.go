@@ -316,3 +316,26 @@ func TestPickOnLink(t *testing.T) {
 		t.Fatalf("own address accepted: %q", got)
 	}
 }
+
+func TestChildEnvCapsSoftwareGL(t *testing.T) {
+	has := func(env []string, want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+	if env := NewManager(Config{}).childEnv(1, 101, "/x"); has(env, "LP_NUM_THREADS=2") {
+		t.Fatal("no cap configured, yet LP_NUM_THREADS is set")
+	}
+	env := NewManager(Config{SoftGLThreads: 2}).childEnv(1, 101, "/x")
+	if !has(env, "LP_NUM_THREADS=2") {
+		t.Fatalf("LP_NUM_THREADS missing: %v", env)
+	}
+	for _, e := range env {
+		if strings.HasPrefix(e, "CONTROL_SECRET") {
+			t.Fatal("the control secret leaked into a browser's environment")
+		}
+	}
+}
