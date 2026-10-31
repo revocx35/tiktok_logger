@@ -9,6 +9,10 @@ import type { WebApi } from './web/api.js';
  * stored once, the retention sweep deletes old stories with their media, and nothing is fetched while logging is off.
  */
 
+// Fixture times follow the clock: fixed ones went stale once the stories' expiry passed and the tests failed from then on.
+const NOW_S = Math.floor(Date.now() / 1000);
+const EXPIRES_MS = (NOW_S + 20 * 3600) * 1000;
+
 const trayAnswer = (users: unknown[], cursor = '2', hasMore = false) => ({ storyUsers: users, cursor, hasMore, statusCode: 0 });
 const user = (id: string, uniqueId: string, nickname = 'Someone', avatarMedium = 'https://p16.example.com/a.jpg') => ({
   stats: { diggCount: 1 },
@@ -17,10 +21,10 @@ const user = (id: string, uniqueId: string, nickname = 'Someone', avatarMedium =
 
 const videoItem = (id: string) => ({
   id,
-  createTime: 1792638760,
+  createTime: NOW_S - 3600,
   desc: '',
   video: { playAddr: `https://v16-webapp-prime.tiktok.com/video/${id}.mp4`, duration: 10, width: 576, height: 1024 },
-  story: { ExpiredAt: 1792725160000, Viewed: false },
+  story: { ExpiredAt: EXPIRES_MS, Viewed: false },
   stats: { diggCount: 7, playCount: 88, commentCount: 0, shareCount: 2, collectCount: 0 },
 });
 
@@ -28,35 +32,35 @@ const videoItem = (id: string) => ({
 // what let every photo story be dropped in production for a release while the parser "passed".
 const photoItem = (id: string) => ({
   id,
-  createTime: 1792638000,
+  createTime: NOW_S - 3700,
   imagePost: {
     images: [
       { imageWidth: 720, imageHeight: 1280, imageURL: { urlList: ['https://p16.example.com/small.jpg'] } },
       { imageWidth: 1080, imageHeight: 1920, imageURL: { urlList: ['https://p16.example.com/big.jpg', 'https://p19.example.com/big.jpg'] } },
     ],
   },
-  story: { ExpiredAt: 1792724400000 },
+  story: { ExpiredAt: EXPIRES_MS },
   stats: { diggCount: 1, playCount: 2 },
 });
 
 /** The older `displayImage` shape, still accepted. */
 const legacyPhotoItem = (id: string) => ({
   id,
-  createTime: 1792638000,
+  createTime: NOW_S - 3700,
   imagePost: { images: [{ imageWidth: 640, displayImage: [{ width: 640, urlList: ['https://p16.example.com/legacy.jpg'] }] }] },
-  story: { ExpiredAt: 1792724400000 },
+  story: { ExpiredAt: EXPIRES_MS },
 });
 
 /** A photo story with no gallery link at all: its cover is still the picture. */
 const coverOnlyPhotoItem = (id: string) => ({
   id,
-  createTime: 1792638000,
+  createTime: NOW_S - 3700,
   imagePost: { cover: { imageURL: { urlList: ['https://p16.example.com/cover.jpg'] } }, images: [] },
-  story: { ExpiredAt: 1792724400000 },
+  story: { ExpiredAt: EXPIRES_MS },
 });
 
 const batchAnswer = (authorId: string, items: unknown[]) => ({
-  batchStoryItemLists: [{ AuthorId: authorId, LastStoryCreatedAt: '1792638760009', TotalCount: String(items.length), MaxCursor: '', MinCursor: '', itemList: items }],
+  batchStoryItemLists: [{ AuthorId: authorId, LastStoryCreatedAt: `${(NOW_S - 3600) * 1000 + 9}`, TotalCount: String(items.length), MaxCursor: '', MinCursor: '', itemList: items }],
 });
 
 describe('story parsers', () => {
@@ -72,14 +76,14 @@ describe('story parsers', () => {
   it('reads a video story: play address, expiry and the item numbers', () => {
     const [group] = parseBatch(batchAnswer('7569493869424952327', [videoItem('7412345678901234569')]));
     expect(group!.authorId).toBe('7569493869424952327');
-    expect(group!.lastStoryAt).toBe(1792638760009);
+    expect(group!.lastStoryAt).toBe((NOW_S - 3600) * 1000 + 9);
     expect(group!.items).toHaveLength(1);
     expect(group!.items[0]).toMatchObject({
       id: '7412345678901234569',
       type: 'video',
       mime: 'video/mp4',
-      takenAt: 1792638760000, // seconds → ms
-      expiresAt: 1792725160000,
+      takenAt: (NOW_S - 3600) * 1000, // seconds → ms
+      expiresAt: EXPIRES_MS,
       likes: 7,
       plays: 88,
     });
@@ -92,7 +96,7 @@ describe('story parsers', () => {
     expect(item.type).toBe('image');
     expect(item.mime).toBe('image/jpeg');
     expect(item.url).toBe('https://p16.example.com/big.jpg');
-    expect(item.takenAt).toBe(1792638000000);
+    expect(item.takenAt).toBe((NOW_S - 3700) * 1000);
   });
 
   it('reads the older displayImage shape too, and falls back to the cover so a photo story is never dropped', () => {
@@ -178,7 +182,7 @@ describe('story logger', () => {
     expect(row).toMatchObject({ user_id: '7569493869424952327', type: 'video', status: 'downloaded' });
     expect(row!.media_id).toBeGreaterThan(0);
     const stored = ctx.repo.getStoryUser('7569493869424952327');
-    expect(stored?.last_story_at).toBe(1792638760009);
+    expect(stored?.last_story_at).toBe((NOW_S - 3600) * 1000 + 9);
 
     // The same story comes back on the next pass: nothing is duplicated and its media is not downloaded again.
     const second = await logger.checkNow();
