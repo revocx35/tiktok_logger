@@ -8,10 +8,12 @@ import { Icon } from '../components/Icon';
 import { MessageBubble, isSelectable, type MessageActions } from '../components/MessageBubble';
 import { useAppState } from '../state/AppState';
 import { Avatar, ErrorNote, Spinner } from '../components/ui';
-import { dayKey, formatDayLabel, formatListTime } from '../lib/format';
+import { dayKey, formatDayLabel, formatListTime, formatTime } from '../lib/format';
 
 const PAGE = 60;
 const GROUP_GAP_MS = 5 * 60_000;
+/** A gap this long gets its own centred time line, as in TikTok's chat. */
+const TIME_GAP_MS = 60 * 60_000;
 
 function sortMessages(list: Message[]): Message[] {
   return [...list].sort((a, b) => a.ts - b.ts || a.capturedAt - b.capturedAt);
@@ -261,8 +263,12 @@ export function ChatView({ chatId }: { chatId: string }) {
     for (const m of messages) {
       const dk = dayKey(m.ts);
       if (dk !== lastDay) {
-        out.push({ kind: 'day', key: `d-${dk}`, label: formatDayLabel(m.ts) });
+        out.push({ kind: 'day', key: `d-${dk}`, label: `${formatDayLabel(m.ts)} ${formatTime(m.ts)}` });
         lastDay = dk;
+        prev = null;
+      } else if (prev && m.ts - prev.ts > TIME_GAP_MS) {
+        // TikTok puts the time between messages (centred, no bubble) instead of inside every bubble.
+        out.push({ kind: 'day', key: `t-${m.id}`, label: formatTime(m.ts) });
         prev = null;
       }
       const showSender = !prev || prev.senderId !== m.senderId || prev.fromMe !== m.fromMe || m.ts - prev.ts > GROUP_GAP_MS || prev.type === 'system';
@@ -311,7 +317,7 @@ export function ChatView({ chatId }: { chatId: string }) {
           <button className="icon-btn mobile-only" onClick={() => navigate('/')} aria-label="Back to chats">
             <Icon name="back" />
           </button>
-          <Avatar id={chatId} name={title} url={chat?.avatarUrl} kind={chat?.kind} size={40} />
+          <Avatar id={chatId} name={title} url={chat?.avatarUrl} kind={chat?.kind} size={48} />
           <div className="chat-head-info">
             <div className="chat-head-name">{title}</div>
             <div className="muted small">
@@ -374,6 +380,12 @@ export function ChatView({ chatId }: { chatId: string }) {
               onJump={jump}
               selection={selectionProps.get(r.m.id)}
               actions={canSend ? actions : undefined}
+              avatar={{
+                id: isGroup ? r.m.senderId ?? r.m.senderName ?? chatId : chatId,
+                name: isGroup ? r.m.senderName ?? '?' : title,
+                url: isGroup ? null : chat?.avatarUrl ?? null,
+                show: r.showSender,
+              }}
             />
           ),
         )}

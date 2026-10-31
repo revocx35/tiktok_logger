@@ -257,37 +257,40 @@ export function Composer({
           <span className="rec-time">{formatDuration(elapsed)}</span>
           <span className="grow muted small">Recording a voice message…</span>
           <button className="icon-btn send" onClick={() => stopRecording(true)} aria-label="Send voice message">
-            <Icon name="send" />
+            <Icon name="arrowUp" size={20} />
           </button>
         </div>
       ) : (
         <div className="compose-row">
-          {!editing ? (
-            <>
-              <button className="icon-btn" onClick={() => picker.current?.click()} disabled={disabled} aria-label="Attach a photo or video" title="Attach a photo or video">
-                <Icon name="image" />
-              </button>
-              <input ref={picker} type="file" accept="image/*,video/*,audio/*" hidden onChange={pick} />
-            </>
-          ) : null}
-          <textarea
-            ref={input}
-            rows={1}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={editing ? 'Edit message' : 'Message…'}
-            aria-label="Message"
-            maxLength={1000}
-            disabled={!!disabledReason}
-          />
+          {/* TikTok's composer: one rounded field with the attachment icon inside, a red round send arrow beside it. */}
+          <div className="compose-field">
+            <textarea
+              ref={input}
+              rows={1}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={onKey}
+              placeholder={editing ? 'Edit message' : 'Send a message...'}
+              aria-label="Message"
+              maxLength={1000}
+              disabled={!!disabledReason}
+            />
+            {!editing ? (
+              <>
+                <button className="icon-btn small" onClick={() => picker.current?.click()} disabled={disabled} aria-label="Attach a photo or video" title="Attach a photo or video">
+                  <Icon name="image" size={22} />
+                </button>
+                <input ref={picker} type="file" accept="image/*,video/*,audio/*" hidden onChange={pick} />
+              </>
+            ) : null}
+          </div>
           {busy ? (
             <span className="icon-btn" aria-label="Sending">
               <Spinner size={18} />
             </span>
           ) : text.trim() || file || editing ? (
             <button className="icon-btn send" onClick={send} disabled={disabled} aria-label={editing ? 'Save edit' : 'Send'}>
-              <Icon name={editing ? 'check' : 'send'} />
+              <Icon name={editing ? 'check' : 'arrowUp'} size={20} />
             </button>
           ) : (
             <button className="icon-btn" onClick={() => void startRecording()} disabled={disabled} aria-label="Record a voice message" title="Record a voice message">

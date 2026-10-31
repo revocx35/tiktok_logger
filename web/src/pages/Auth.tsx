@@ -2,20 +2,18 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, errorMessage } from '../api/client';
 import { Icon } from '../components/Icon';
-import { ErrorNote, Spinner } from '../components/ui';
+import { BrandMark, ErrorNote, Spinner } from '../components/ui';
 import { useAppState } from '../state/AppState';
 
 export function AuthShell({ title, subtitle, children, wide = false }: { title: string; subtitle?: ReactNode; children: ReactNode; wide?: boolean }) {
   return (
     <div className="auth-page">
-      <div className="auth-banner" />
+      {/* TikTok's login page: the logo top left, then one plain centred column. */}
+      <header className="auth-top">
+        <BrandMark size={32} />
+        <span className="wordmark">tiktok_logger</span>
+      </header>
       <div className={wide ? 'auth-card wide' : 'auth-card'}>
-        <div className="auth-brand">
-          <span className="brand-logo">
-            <Icon name="shield" size={26} />
-          </span>
-          <span>tiktok_logger</span>
-        </div>
         <h1>{title}</h1>
         {subtitle ? <p className="muted">{subtitle}</p> : null}
         {children}

@@ -1,62 +1,71 @@
-/* tiktok_logger — TikTok-like UI. Light + dark themes via prefers-color-scheme. */
+/* tiktok_logger — styled after TikTok's own web UI and app (2026-10-31): TikTok Sans, TikTok's greys and red, the
+   web sidebar, the app's tab bar. Light + dark themes via prefers-color-scheme (TikTok Web itself now opens dark). */
 
 :root {
   color-scheme: light dark;
-  --bg: #fafafa;
+  --bg: #ffffff;
   --panel: #ffffff;
-  --panel-2: #fafafa;
+  --panel-2: #f1f1f2; /* TikTok's rgba(22,24,35,.06) on white: search, chips, inputs, incoming bubbles */
   --head: #ffffff;
   --rail: #ffffff;
   --chat-bg: #ffffff;
-  --in: #efefef;
-  --out: #fe2c55;
-  --out-grad: linear-gradient(135deg, #fe2c55 0%, #f0284f 60%, #d81b47 100%);
+  --in: #f1f1f2;
+  /* Own messages. TikTok's chat colours could not be read from the live site; keep this one token for them. */
+  --out: #2f80ed;
+  --out-grad: var(--out);
   --out-text: #ffffff;
-  --text: #0c1014;
-  --text-2: #3d4651;
-  --muted: #737373;
-  --border: #dbdbdb;
-  --hover: #f2f2f2;
-  --active: #efefef;
+  --text: #161823;
+  --text-2: rgba(22, 24, 35, 0.75);
+  --muted: rgba(22, 24, 35, 0.5);
+  --border: rgba(22, 24, 35, 0.12);
+  --hover: rgba(22, 24, 35, 0.03);
+  --active: rgba(22, 24, 35, 0.06);
   --accent: #fe2c55;
-  --accent-2: #25f4ee;
+  --accent-2: #ef2950; /* primary button hover */
+  --accent-nav: #fe2c55; /* the active sidebar/tab item */
   --accent-text: #ffffff;
+  --cyan: #25f4ee;
   --brand: linear-gradient(45deg, #25f4ee 0%, #1e9bd7 32%, #e5399f 68%, #fe2c55 100%);
-  --link: #b81d3f;
+  --link: #2b5db9;
   --danger: #fe2c55;
-  --danger-bg: #fdeaec;
+  --danger-bg: rgba(254, 44, 85, 0.08);
   --warn: #f5a623;
   --warn-bg: #fff4d6;
-  --ok: #58c322;
+  --ok: #20d5ec;
   --shadow: none;
+  --pop-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
   --radius: 8px;
   --system: transparent;
-  --quote-bg: rgba(0, 0, 0, 0.06);
-  --tick-read: #0095f6;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --quote-bg: rgba(22, 24, 35, 0.06);
+  --tick-read: #20d5ec;
+  --tabbar: #ffffff;
+  font-family: 'TikTok Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-size: 15px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
-    --panel: #000000;
-    --panel-2: #121212;
-    --head: #000000;
-    --rail: #000000;
-    --chat-bg: #000000;
-    --in: #262626;
-    --text: #f5f5f5;
-    --text-2: #c7c7c7;
-    --muted: #a8a8a8;
-    --border: #262626;
-    --hover: #1a1a1a;
-    --active: #262626;
-    --link: #e0f1ff;
-    --danger: #ff6170;
-    --danger-bg: #3a1418;
+    --bg: #121212;
+    --panel: #121212;
+    --panel-2: #2f2f2f; /* rgba(255,255,255,.12) on #121212 */
+    --head: #121212;
+    --rail: #121212;
+    --chat-bg: #121212;
+    --in: #2f2f2f;
+    --text: rgba(255, 255, 255, 0.9);
+    --text-2: rgba(255, 255, 255, 0.75);
+    --muted: rgba(255, 255, 255, 0.5);
+    --border: rgba(255, 255, 255, 0.12);
+    --hover: rgba(255, 255, 255, 0.04);
+    --active: rgba(255, 255, 255, 0.08);
+    --accent-nav: #ff3b5c;
+    --link: #8ab4f8;
+    --danger: #ff3b5c;
+    --danger-bg: rgba(255, 59, 92, 0.12);
     --warn-bg: #3b3218;
     --quote-bg: rgba(255, 255, 255, 0.08);
+    --pop-shadow: 0 2px 16px rgba(0, 0, 0, 0.6);
+    --tabbar: #000000;
   }
 }
 
@@ -91,18 +100,18 @@ textarea,
 select {
   font: inherit;
   color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 11px 12px;
   width: 100%;
   outline: none;
 }
 
 input:focus,
 textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 input[type='checkbox'] {
@@ -113,7 +122,7 @@ input[type='checkbox'] {
 h1,
 h2,
 h3 {
-  font-weight: 500;
+  font-weight: 700;
   margin: 0 0 8px;
 }
 
@@ -207,21 +216,22 @@ h3 {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border: 1px solid transparent;
+  background: var(--panel-2);
   color: var(--text);
-  border-radius: 20px;
-  padding: 8px 18px;
+  border-radius: 8px;
+  padding: 8px 16px;
   cursor: pointer;
   text-decoration: none;
-  min-height: 38px;
+  min-height: 40px;
   white-space: nowrap;
+  font-weight: 600;
 }
 .btn:hover:not(:disabled) {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--panel-2) 85%, var(--text));
 }
 .btn:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 .btn.primary {
@@ -242,15 +252,17 @@ h3 {
 }
 .btn.ghost {
   background: transparent;
+  border-color: var(--border);
 }
 .btn.block {
   width: 100%;
 }
 .btn.tiny {
-  min-height: 26px;
-  padding: 2px 10px;
+  min-height: 28px;
+  padding: 2px 12px;
   font-size: 0.85em;
 }
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -393,57 +405,67 @@ h3 {
 
 /* ------------------------------------------------------------ auth */
 
+/* TikTok's login page: the logo top left, then one plain centred column (no card), a bold title, grey borderless
+   fields and a full-width red button. */
 .auth-page {
   min-height: 100%;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 64px 16px;
-  position: relative;
+  flex-direction: column;
+  align-items: center;
+  background: var(--bg);
 }
-.auth-banner {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 220px;
-  background: var(--brand);
-  z-index: 0;
-}
-@media (prefers-color-scheme: dark) {
-  .auth-banner {
-    opacity: 0.55;
-  }
+.auth-top {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
 }
 .auth-card {
-  position: relative;
-  z-index: 1;
   width: 100%;
-  max-width: 440px;
-  background: var(--panel);
-  border-radius: 12px;
-  padding: 32px;
-  box-shadow: 0 17px 50px 0 rgba(11, 20, 26, 0.19), 0 12px 15px 0 rgba(11, 20, 26, 0.24);
+  max-width: 407px;
+  padding: 40px 16px 48px;
 }
 .auth-card.wide {
   max-width: 620px;
 }
-.auth-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.auth-card > h1 {
+  font-size: 32px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+.auth-card > p.muted {
+  text-align: center;
+}
+.auth-card .form .btn.primary {
+  min-height: 46px;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.auth-card .form label {
   font-weight: 600;
-  margin-bottom: 24px;
   color: var(--text);
+}
+.wordmark {
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  white-space: nowrap;
 }
 .brand-logo {
   width: 40px;
   height: 40px;
-  border-radius: 12px;
+  border-radius: 11px;
   background: var(--brand);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: none;
 }
+
 .form {
   display: flex;
   flex-direction: column;
@@ -601,57 +623,220 @@ label.switch {
 
 /* ------------------------------------------------------------ app shell */
 
+/* TikTok Web's sidebar: 240 px with labels; 72 px icons only on the messages pages and under 1024 px. On phones the
+   sidebar gives way to the TikTok app's bottom tab bar (see the responsive section). */
 .app-shell {
   display: flex;
   height: 100%;
-  max-width: 1700px;
-  margin: 0 auto;
-  background: var(--panel);
-  box-shadow: 0 6px 18px rgba(11, 20, 26, 0.05);
+  background: var(--bg);
 }
 .rail {
-  width: 72px;
+  width: 240px;
   flex: none;
   background: var(--rail);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: 10px 0;
+  padding: 20px 16px 16px;
+  /* Not a scroll box: the More popup has to reach past the sidebar's edge. */
+  position: relative;
+  z-index: 20;
 }
-.rail-top,
-.rail-bottom {
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  height: 32px;
+  margin-bottom: 16px;
+  text-decoration: none;
+}
+.rail-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 14px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 500;
+}
+.rail-search:hover,
+.rail-search.active {
+  color: var(--text);
+}
+.rail-top {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .rail-item {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  width: 60px;
-  padding: 8px 0;
-  border-radius: 12px;
-  color: var(--text-2);
+  gap: 12px;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text);
   text-decoration: none;
   background: none;
   border: none;
   cursor: pointer;
+  width: 100%;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: left;
 }
 .rail-item:hover {
-  background: var(--active);
+  background: var(--hover);
 }
 .rail-item.active {
-  background: var(--active);
-  color: var(--accent);
+  color: var(--accent-nav);
+}
+.rail-icon {
+  position: relative;
+  display: inline-flex;
+  width: 32px;
+  justify-content: center;
+  flex: none;
+}
+.nav-dot {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1.5px solid var(--rail);
 }
 .rail-label {
-  font-size: 0.68em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.rail-status {
-  padding: 6px;
+.rail-more {
+  position: relative;
+}
+.rail-foot {
+  margin-top: auto;
+  padding: 16px 8px 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rail-foot-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.app-shell.narrow .rail,
+.app-shell .rail.narrow {
+  width: 72px;
+  padding: 20px 12px 16px;
+  border-right: 1px solid var(--border);
+}
+.app-shell.narrow .rail .wordmark,
+.app-shell.narrow .rail .rail-label,
+.app-shell.narrow .rail .rail-foot {
+  display: none;
+}
+.app-shell.narrow .rail-brand {
+  justify-content: center;
+  padding: 0;
+}
+.app-shell.narrow .rail-search {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+  align-self: center;
+}
+.app-shell.narrow .rail-item {
+  justify-content: center;
+  padding: 0;
+}
+/* "More": a popup beside the sidebar on wide screens; on phones the Profile tab opens it as a bottom sheet. */
+.more-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 250px;
+}
+.rail-more > .more-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--pop-shadow);
+  padding: 6px 0;
+}
+.app-shell.narrow .rail-more > .more-menu {
+  left: calc(100% + 8px);
+  top: auto;
+  bottom: 0;
+}
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.more-item:hover,
+.more-item.active {
+  background: var(--hover);
+}
+.more-item .pill {
+  margin-left: auto;
+}
+.more-status {
+  padding: 4px 16px 8px;
+}
+.more-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.more-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 14px;
+}
+.more-who > span:last-child {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.more-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}
+.tabbar,
+.more-sheet-backdrop {
+  display: none;
 }
 .app-main {
   flex: 1;
@@ -663,76 +848,77 @@ label.switch {
 
 /* ------------------------------------------------------------ two pane */
 
+/* TikTok's messages page: the inbox column, then the conversation. */
 .two-pane {
   flex: 1;
   display: flex;
   min-height: 0;
 }
 .chat-list {
-  width: 30%;
-  min-width: 300px;
-  max-width: 440px;
+  width: 360px;
+  flex: none;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   background: var(--panel);
 }
 .pane-head {
-  height: 60px;
+  height: 64px;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 20px;
   background: var(--panel);
 }
 .pane-head h2 {
   margin: 0;
-  font-size: 1.4em;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
 }
 .search-box {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 12px 8px;
+  margin: 0 16px 10px;
   background: var(--panel-2);
-  border-radius: 8px;
-  padding: 0 10px;
+  border-radius: 999px;
+  padding: 0 14px;
   color: var(--muted);
 }
 .search-box input {
   border: none;
   background: transparent;
-  padding: 8px 4px;
+  padding: 10px 4px;
   box-shadow: none;
 }
 .search-box.big {
   margin: 12px 0;
-  padding: 4px 6px 4px 12px;
+  padding: 2px 6px 2px 14px;
 }
 .chips {
   display: flex;
-  gap: 6px;
-  padding: 0 12px 8px;
+  gap: 8px;
+  padding: 0 16px 10px;
   flex-wrap: wrap;
 }
+/* TikTok's category chips: plain text, the chosen one on a grey rounded box. */
 .chip {
   border: none;
-  background: var(--panel-2);
+  background: transparent;
   color: var(--text-2);
-  border-radius: 16px;
-  padding: 4px 12px;
+  border-radius: 8px;
+  padding: 6px 12px;
   cursor: pointer;
-  font-size: 0.88em;
+  font-size: 14px;
+  font-weight: 600;
+}
+.chip:hover {
+  color: var(--text);
 }
 .chip.active {
-  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
-  color: var(--accent-2);
-}
-@media (prefers-color-scheme: dark) {
-  .chip.active {
-    color: var(--ok);
-  }
+  background: var(--panel-2);
+  color: var(--text);
 }
 .chat-items {
   flex: 1;
@@ -743,12 +929,13 @@ label.switch {
   width: 100%;
   gap: 12px;
   align-items: center;
-  padding: 0 12px;
-  height: 72px;
+  padding: 8px 20px;
+  min-height: 72px;
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
+  color: var(--text);
 }
 .chat-item:hover {
   background: var(--hover);
@@ -759,33 +946,32 @@ label.switch {
 .chat-item-body {
   flex: 1;
   min-width: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
-  border-bottom: 1px solid var(--border);
+  gap: 4px;
 }
 .chat-item-top,
 .chat-item-bottom {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
   align-items: center;
+  min-width: 0;
 }
 .chat-name {
-  font-size: 1.02em;
+  font-size: 16px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .chat-time {
-  font-size: 0.75em;
+  font-size: 14px;
   color: var(--muted);
   flex: none;
 }
 .chat-preview {
-  font-size: 0.88em;
+  font-size: 14px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -794,9 +980,10 @@ label.switch {
   align-items: center;
   gap: 4px;
   min-width: 0;
+  flex: 0 1 auto;
 }
 .chat-preview b {
-  font-weight: 500;
+  font-weight: 400;
 }
 .chat-preview.deleted {
   color: var(--danger);
@@ -806,6 +993,7 @@ label.switch {
   gap: 6px;
   align-items: center;
   flex: none;
+  margin-left: auto;
   color: var(--muted);
 }
 
@@ -818,15 +1006,11 @@ label.switch {
   justify-content: center;
   color: #fff;
   font-weight: 600;
+  background: var(--panel-2);
 }
 .avatar-icon {
-  background: #6a7175;
-  color: #dfe5e7;
-}
-@media (prefers-color-scheme: dark) {
-  .avatar-icon {
-    background: #3b4a54;
-  }
+  background: var(--panel-2);
+  color: var(--muted);
 }
 .status-ring {
   box-shadow: 0 0 0 2px var(--accent);
@@ -843,18 +1027,16 @@ label.switch {
 }
 .chat-view.placeholder {
   justify-content: center;
-  background: var(--panel-2);
-  border-bottom: 6px solid var(--accent);
 }
 .chat-head {
-  height: 60px;
+  height: 72px;
   flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
+  padding: 0 20px;
   background: var(--head);
-  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .chat-head-info {
   flex: 1;
@@ -866,11 +1048,13 @@ label.switch {
   text-overflow: ellipsis;
 }
 .chat-head-name {
-  font-size: 1.02em;
+  font-size: 18px;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .chat-search {
   background: var(--panel);
   padding-top: 8px;
@@ -904,42 +1088,40 @@ label.switch {
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 6% 20px;
+  padding: 16px 20px 20px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .chat-foot {
   flex: none;
-  padding: 8px 16px;
+  padding: 12px 16px;
   background: var(--head);
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 6px;
   justify-content: center;
 }
+/* TikTok writes the day and time between messages: centred grey text, no pill. */
 .day-sep {
   display: flex;
   justify-content: center;
-  margin: 10px 0;
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  margin: 16px 0 8px;
 }
 .day-sep span,
 .system-pill {
   background: var(--system);
-  color: var(--text-2);
-  font-size: 0.8em;
-  padding: 5px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 12px;
   border-radius: 8px;
-  box-shadow: var(--shadow);
   text-transform: none;
 }
 .system-row {
   display: flex;
   justify-content: center;
-  margin: 6px 0;
+  margin: 8px 0;
   text-align: center;
 }
 
@@ -947,6 +1129,10 @@ label.switch {
   display: flex;
   flex-direction: column;
   margin: 1px 0;
+  position: relative;
+}
+.msg-row.run-start {
+  margin-top: 8px;
 }
 .msg-row.in {
   align-items: flex-start;
@@ -954,24 +1140,32 @@ label.switch {
 .msg-row.out {
   align-items: flex-end;
 }
+/* The sender's avatar beside incoming messages (on the first of a run), as in TikTok's chat. */
+.msg-row.with-avatar {
+  padding-left: 40px;
+}
+.msg-avatar {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
 .bubble {
   position: relative;
-  max-width: min(65%, 560px);
-  padding: 7px 12px;
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  font-size: 0.95em;
-  line-height: 1.38;
+  max-width: min(70%, 520px);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1.4;
   word-wrap: break-word;
   overflow-wrap: anywhere;
   transition: box-shadow 0.3s;
 }
 .bubble.in {
   background: var(--in);
+  color: var(--text);
 }
 .bubble.out {
-  background: var(--out-grad);
-  background-attachment: fixed;
+  background: var(--out);
   color: var(--out-text);
 }
 .bubble.out a,
@@ -988,19 +1182,20 @@ label.switch {
   background: rgba(255, 255, 255, 0.18);
   border-left-color: rgba(255, 255, 255, 0.8);
 }
-.bubble.out .quote-sender {
+.bubble.out .quote-sender,
+.bubble.out .quote-text {
   color: #fff;
 }
 .bubble.sticker {
   background: transparent;
-  box-shadow: none;
 }
 .bubble.deleted {
-  box-shadow: 0 0 0 2px var(--danger), var(--shadow);
+  box-shadow: 0 0 0 2px var(--danger);
 }
 .bubble.highlight {
-  box-shadow: 0 0 0 3px var(--warn), var(--shadow);
+  box-shadow: 0 0 0 3px var(--warn);
 }
+
 .deleted-banner {
   display: flex;
   align-items: center;
@@ -1032,9 +1227,9 @@ label.switch {
   width: 100%;
   text-align: left;
   border: none;
-  border-left: 4px solid var(--accent);
+  border-left: 3px solid var(--muted);
   background: var(--quote-bg);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 5px 8px;
   margin: 2px 0 5px;
   cursor: pointer;
@@ -1045,12 +1240,7 @@ label.switch {
 .quote-sender {
   font-size: 0.8em;
   font-weight: 600;
-  color: var(--accent-2);
-}
-@media (prefers-color-scheme: dark) {
-  .quote-sender {
-    color: var(--ok);
-  }
+  color: var(--text);
 }
 .quote-text {
   font-size: 0.85em;
@@ -1094,9 +1284,9 @@ label.switch {
   margin-top: -4px;
   margin-inline: 8px;
   background: var(--panel);
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   padding: 1px 6px;
-  box-shadow: var(--shadow);
   font-size: 0.85em;
   z-index: 1;
 }
@@ -1367,25 +1557,29 @@ label.switch {
   gap: 10px;
   font-size: 1.5em;
 }
-.feed {
+.log-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
   max-width: 900px;
 }
-.feed-item {
+.log-body {
+  display: block;
+  margin-top: 4px;
+}
+.log-item {
   background: var(--chat-bg);
   border-radius: 10px;
   padding: 10px 14px;
 }
-.feed-head {
+.log-head {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
   flex-wrap: wrap;
 }
-.feed-head .btn {
+.log-head .btn {
   margin-left: auto;
 }
 .search-hit {
@@ -1604,7 +1798,8 @@ label.switch {
   height: 64px;
   border-radius: 50%;
   padding: 3px;
-  background: var(--brand);
+  /* TikTok's story ring: cyan. */
+  background: linear-gradient(135deg, #25f4ee, #20d5ec 55%, #1e9bd7);
   display: grid;
   place-items: center;
 }
@@ -2213,56 +2408,128 @@ button.reel-action:disabled {
   display: none;
 }
 
-@media (max-width: 900px) {
+/* Under 1024 px TikTok Web folds its sidebar to icons, as on the messages pages. */
+@media (max-width: 1023px) {
+  .app-shell .rail {
+    width: 72px;
+    padding: 20px 12px 16px;
+    border-right: 1px solid var(--border);
+  }
+  .app-shell .rail .wordmark,
+  .app-shell .rail .rail-label,
+  .app-shell .rail .rail-foot {
+    display: none;
+  }
+  .app-shell .rail-brand {
+    justify-content: center;
+    padding: 0;
+  }
+  .app-shell .rail-search {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+    align-self: center;
+  }
+  .app-shell .rail-item {
+    justify-content: center;
+    padding: 0;
+  }
+  .app-shell .rail-more > .more-menu {
+    left: calc(100% + 8px);
+    top: auto;
+    bottom: 0;
+  }
+  .app-shell .rail-foot {
+    display: none;
+  }
+  .chat-list {
+    width: 320px;
+  }
+}
+
+/* Phones: the TikTok app — a bottom tab bar (Home · Stories · Inbox · Unsent · Profile), one pane at a time. */
+@media (max-width: 767px) {
   .app-shell {
-    flex-direction: column-reverse;
+    flex-direction: column;
   }
-  .rail {
-    width: 100%;
-    height: auto;
-    flex-direction: row;
-    padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
-    border-right: none;
-    border-top: 1px solid var(--border);
+  .app-shell .rail {
+    display: none;
   }
-  .rail-top,
-  .rail-bottom {
-    flex-direction: row;
-    gap: 2px;
-  }
-  .rail-item {
-    width: 58px;
-    padding: 4px 0;
-  }
-  .rail-top {
+  .app-main {
     flex: 1;
-    min-width: 0;
-    justify-content: space-around;
+    min-height: 0;
+    height: auto;
   }
-  .rail-top .rail-item,
-  .rail-bottom .rail-item {
+  .tabbar {
+    display: flex;
+    flex: none;
+    background: var(--tabbar);
+    border-top: 1px solid var(--border);
+    padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
+  }
+  .app-shell.on-feed .tabbar {
+    background: #000;
+    border-top-color: rgba(255, 255, 255, 0.12);
+    --text: #fff;
+    --muted: rgba(255, 255, 255, 0.6);
+  }
+  .app-shell.in-chat .tabbar {
+    display: none;
+  }
+  .tab-item {
     flex: 1 1 0;
-    width: auto;
     min-width: 0;
-    max-width: 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 0 2px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    text-decoration: none;
+    cursor: pointer;
   }
-  .rail-label {
-    font-size: 0.62rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+  .tab-item.active {
+    color: var(--text);
   }
-  .rail-status {
-    display: none;
+  .tab-label {
+    font-size: 10px;
+    font-weight: 600;
   }
-  .app-shell.in-chat .rail {
-    display: none;
+  .tab-item .nav-dot {
+    border-color: var(--tabbar);
+  }
+  .more-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(0, 0, 0, 0.5);
+  }
+  .more-sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--panel);
+    border-radius: 12px 12px 0 0;
+    padding: 8px 0 calc(12px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+  .sheet-grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    align-self: center;
+    margin-bottom: 10px;
   }
   .two-pane .chat-list {
     width: 100%;
-    max-width: none;
-    min-width: 0;
     border-right: none;
   }
   .two-pane .chat-view {
@@ -2274,33 +2541,28 @@ button.reel-action:disabled {
   .two-pane.has-chat .chat-view {
     display: flex;
   }
+  .pane-head {
+    justify-content: center;
+    height: 52px;
+  }
+  .pane-head h2 {
+    font-size: 17px;
+  }
+  .chat-head {
+    height: 60px;
+    padding: 0 8px;
+  }
   .mobile-only {
     display: inline-flex;
   }
-  .reel {
-    padding: 0;
-    position: relative;
-  }
-  .reel-stage {
-    width: 100%;
-    max-width: none;
-    aspect-ratio: auto;
-    border-radius: 0;
-  }
-  .reel-info {
-    padding-right: 72px;
-  }
-  .reel-actions {
-    position: absolute;
-    right: 10px;
-    bottom: 18px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-  }
   .messages {
-    padding: 10px 10px 16px;
+    padding: 10px 12px 16px;
   }
   .bubble {
-    max-width: 85%;
+    max-width: 78%;
+  }
+  .composer {
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   }
   .setup-body {
     grid-template-columns: 1fr;
@@ -2311,11 +2573,11 @@ button.reel-action:disabled {
   .page {
     padding: 16px;
   }
-  .auth-page {
-    padding: 24px 12px;
-  }
   .auth-card {
-    padding: 22px;
+    padding: 24px 16px 40px;
+  }
+  .auth-card > h1 {
+    font-size: 26px;
   }
 }
 
@@ -2366,10 +2628,12 @@ button.reel-action:disabled {
 }
 
 /* ---------------------------------------------------------------- composer */
+/* TikTok's composer: one grey rounded field (attachment icon inside), a red round send arrow beside it. */
 .composer {
   flex: none;
   background: var(--head);
-  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  padding: 12px 16px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2377,25 +2641,55 @@ button.reel-action:disabled {
 .compose-row {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: 8px;
 }
+.compose-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 4px 6px 4px 14px;
+}
+.compose-field textarea,
 .compose-row textarea {
   flex: 1;
   resize: none;
-  min-height: 40px;
+  min-height: 36px;
   max-height: 160px;
-  padding: 9px 12px;
-  border-radius: 20px;
+  padding: 8px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   line-height: 1.35;
   font: inherit;
 }
+.compose-field textarea:focus {
+  border: none;
+}
+.compose-field .icon-btn.small {
+  width: 36px;
+  height: 36px;
+  color: var(--text-2);
+}
+.compose-row > .icon-btn {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
 .compose-row .icon-btn.send {
+  width: 36px;
+  height: 36px;
+  margin: 4px;
   background: var(--accent);
-  color: var(--accent-text);
+  color: #fff;
 }
 .compose-row .icon-btn.send:hover {
   background: var(--accent-2);
 }
+
 .compose-row.recording {
   align-items: center;
   padding: 4px 0;
@@ -2941,11 +3235,6 @@ button.reel-action:disabled {
   color: transparent;
 }
 
-.day-sep span {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-}
 .bubble .deleted-banner {
   align-self: flex-start;
   width: fit-content;
@@ -3132,53 +3421,77 @@ button.reel-action:disabled {
   font-size: 0.78em;
   color: #b9b9c2;
 }
+/* TikTok's action column: the author's avatar, then solid icons in round grey buttons with bold counts below. */
 .feed-rail {
   display: flex;
   pointer-events: auto;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+}
+.feed-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: #2f2f2f;
+  color: #fff;
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.feed-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .feed-act {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  background: rgba(22, 24, 35, 0.55);
+  gap: 4px;
+  background: none;
   border: 0;
-  color: #fff;
-  border-radius: 999px;
-  padding: 10px 8px;
-  min-width: 58px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.9);
   cursor: pointer;
   text-decoration: none;
-  font-size: 0.72em;
+  font-size: 12px;
+  font-weight: 700;
 }
-.feed-act:hover {
-  background: rgba(254, 44, 85, 0.35);
+.feed-act-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  transition: background 0.15s;
 }
-.feed-act.liked {
+.feed-act:hover .feed-act-icon {
+  background: rgba(255, 255, 255, 0.2);
+}
+.feed-act.liked .feed-act-icon {
   color: #fe2c55;
-}
-.feed-act.liked svg {
-  fill: #fe2c55;
 }
 .feed-nav {
   position: absolute;
   z-index: 4;
-  right: 18px;
+  right: 20px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 .feed-arrow {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: 0;
-  background: rgba(22, 24, 35, 0.6);
+  background: rgba(255, 255, 255, 0.19);
   color: #fff;
   display: grid;
   place-items: center;
@@ -3188,11 +3501,9 @@ button.reel-action:disabled {
   opacity: 0.4;
 }
 .feed-arrow:hover:not(:disabled) {
-  background: rgba(254, 44, 85, 0.5);
+  background: rgba(255, 255, 255, 0.28);
 }
-.feed-arrow .flip {
-  transform: rotate(180deg);
-}
+
 .feed-busy {
   position: absolute;
   z-index: 6;
@@ -3310,9 +3621,9 @@ button.reel-action:disabled {
   .feed-rail {
     gap: 8px;
   }
-  .feed-act {
-    min-width: 48px;
-    padding: 8px 6px;
+  .feed-act-icon {
+    width: 44px;
+    height: 44px;
   }
   .feed-nav {
     right: 10px;
@@ -3394,11 +3705,13 @@ button.reel-action:disabled {
   .feed-rail {
     gap: 6px;
   }
-  .feed-act {
-    padding: 6px 8px;
+  .feed-act-icon {
+    background: none;
+    width: 40px;
+    height: 40px;
   }
-  .feed-act span {
-    font-size: 0.72em;
+  .feed-act {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   }
   .feed-hint {
     display: none;
@@ -3435,4 +3748,72 @@ button.reel-action:disabled {
   .feed-window {
     scroll-behavior: auto;
   }
+}
+
+/* ------------------------------------------------------------ TikTok look: details */
+
+/* TikTok's chat has no time inside the bubbles: the time sits between messages (and on hover, the bubble's title). */
+.meta .time {
+  display: none;
+}
+.meta:empty {
+  display: none;
+}
+/* For You on a wide screen: the video in a rounded 16 px box on black, with the actions inside its right edge (TikTok
+   Web's player). The box is the slide's padding edge: a 16 px border in the page colour with a 32 px outer radius. */
+.on-feed .app-main,
+.feed,
+.feed-window {
+  background: #000;
+}
+.feed-slide {
+  /* The right border leaves room for TikTok's up/down buttons beside the box. */
+  border: 16px solid #000;
+  border-left-width: 0;
+  border-right-width: 80px;
+  border-radius: 32px;
+  background: #0d0d0d;
+}
+.feed-poster {
+  object-fit: cover;
+  filter: blur(28px) brightness(0.45);
+  transform: scale(1.1);
+}
+.feed-overlay {
+  padding: 0 20px 20px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+}
+.feed-author {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 16px;
+}
+.feed-handle {
+  font-weight: 400;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.75);
+}
+.feed-caption {
+  font-size: 14px;
+}
+.feed-hint {
+  background: #000;
+}
+@media (max-width: 767px) {
+  .feed-slide {
+    border: 0;
+    border-radius: 0;
+  }
+  .feed-nav {
+    display: none;
+  }
+}
+.bubble.bare {
+  background: none;
+  padding: 0;
+}
+.bubble.bare .media-img,
+.bubble.bare .media-video {
+  border-radius: 8px;
 }

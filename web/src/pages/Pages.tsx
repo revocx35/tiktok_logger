@@ -25,7 +25,7 @@ export function ChatsPage() {
         <ChatView key={id} chatId={id} />
       ) : (
         <section className="chat-view placeholder">
-          <EmptyState icon="shield" title="tiktok_logger">
+          <EmptyState icon="inbox" title="Your messages">
             Select a chat to read its log. Messages that were unsent stay visible here and are marked in red.
           </EmptyState>
         </section>
@@ -81,10 +81,10 @@ export function DeletedPage() {
           When someone unsends a message you received, the logged copy shows up here.
         </EmptyState>
       ) : (
-        <div className="feed">
+        <div className="log-list">
           {items.map(({ chat, message }) => (
-            <article key={message.id} className="feed-item">
-              <div className="feed-head">
+            <article key={message.id} className="log-item">
+              <div className="log-head">
                 <Avatar id={chat.id} name={chat.name} kind={chat.kind} size={32} />
                 <b>{chat.name}</b>
                 <span className="muted small">
@@ -94,7 +94,7 @@ export function DeletedPage() {
                   Open in chat
                 </button>
               </div>
-              <div className="feed-body">
+              <div className="log-body">
                 <MessageBubble msg={message} isGroup={chat.kind === 'group'} showSender highlighted={false} onJump={() => undefined} />
               </div>
             </article>
@@ -160,7 +160,7 @@ export function SearchPage() {
       </form>
       <ErrorNote error={error} />
       {res ? (
-        <div className="feed">
+        <div className="log-list">
           <p className="muted small">
             {res.hits.length} result{res.hits.length === 1 ? '' : 's'}
             {res.truncated ? ' (search stopped early — refine your query for more)' : ''}

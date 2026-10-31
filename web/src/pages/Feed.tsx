@@ -230,10 +230,10 @@ export function FeedPage() {
 
       <div className="feed-nav">
         <button className="feed-arrow" onClick={() => step('prev')} title="Previous (↑)">
-          <Icon name="back" size={22} />
+          <Icon name="arrowUp" size={22} />
         </button>
         <button className="feed-arrow" onClick={() => step('next')} title="Next (↓)">
-          <Icon name="back" size={22} className="flip" />
+          <Icon name="arrowDown" size={22} />
         </button>
       </div>
       {busy ? (
@@ -371,7 +371,8 @@ function Slide({
         <div className="feed-meta">
           {item.author.username ? (
             <a className="feed-author" href={item.url} target="_blank" rel="noopener noreferrer">
-              @{item.author.username}
+              {item.author.name || item.author.username}
+              {item.author.name && item.author.name !== item.author.username ? <span className="feed-handle">@{item.author.username}</span> : null}
             </a>
           ) : null}
           {item.caption ? <p className="feed-caption">{item.caption}</p> : null}
@@ -385,26 +386,40 @@ function Slide({
           </p>
         </div>
 
+        {/* TikTok's action column: the author's avatar, then solid icons in round buttons with bold counts below. */}
         <div className="feed-rail">
+          <a className="feed-avatar" href={item.url} target="_blank" rel="noopener noreferrer" title={item.author.username ? `@${item.author.username} on TikTok` : 'Open on TikTok'}>
+            {item.author.avatar ? <img src={item.author.avatar} alt="" /> : <Icon name="userFill" size={26} />}
+          </a>
           <button className={item.liked ? 'feed-act liked' : 'feed-act'} onClick={onLike} title={item.liked ? 'Unlike' : 'Like'} aria-pressed={item.liked}>
-            <Icon name="heart" size={28} />
+            <span className="feed-act-icon">
+              <Icon name="heartFill" size={26} />
+            </span>
             <span>{formatCount(item.stats.likes)}</span>
           </button>
           <button className="feed-act" onClick={onComments} title="Comments">
-            <Icon name="comment" size={26} />
+            <span className="feed-act-icon">
+              <Icon name="commentFill" size={24} />
+            </span>
             <span>{formatCount(item.stats.comments)}</span>
           </button>
           <button className="feed-act" onClick={onShare} title="Send to a chat">
-            <Icon name="send" size={24} />
-            <span>Send</span>
+            <span className="feed-act-icon">
+              <Icon name="shareArrow" size={24} />
+            </span>
+            <span>{item.stats.shares ? formatCount(item.stats.shares) : 'Share'}</span>
           </button>
           <button className="feed-act" onClick={onToggleMute} title={muted ? 'Unmute' : 'Mute'}>
-            <Icon name={muted ? 'mute' : 'volume'} size={24} />
-            <span>{muted ? 'Sound off' : 'Sound on'}</span>
+            <span className="feed-act-icon">
+              <Icon name={muted ? 'mute' : 'volume'} size={22} />
+            </span>
+            <span>{muted ? 'Muted' : 'Sound'}</span>
           </button>
           <a className="feed-act" href={item.url} target="_blank" rel="noopener noreferrer" title="Open on TikTok">
-            <Icon name="link" size={22} />
-            <span>TikTok</span>
+            <span className="feed-act-icon">
+              <Icon name="link" size={22} />
+            </span>
+            <span>Open</span>
           </a>
         </div>
       </div>

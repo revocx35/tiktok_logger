@@ -32,7 +32,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 
 ```bash
 cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 205 tests
-cd web && npm ci && npm test && npm run build                                        # strict-CSP build (10 tests)
+cd web && npm ci && npm test && npm run build                                        # strict-CSP build (18 tests)
 cd server && npx tsx ../scripts/dev/service-check.mts   # real service vs fake TikTok (headless Chromium)
 ```
 CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. The running deployment is CT 124 on the
@@ -62,6 +62,15 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 - Attach to the tab while logged out (`loginwatch.ts`), weaken CSP/cookies/CSRF/the Chromium sandbox, edit old migrations.
 
 ## Gotchas
+
+- **The look is TikTok's** (v1.14, ARCHITECTURE §5): change colours through the tokens at the top of `web/src/styles.css`
+  (own bubbles = `--out` only), add icons to `components/Icon.tsx` as outline + solid `…Fill` twin when they go in the
+  nav, and regenerate the Android client's `WaIcons.kt` from that file. A new class family in the markup needs a rule:
+  `pages/storiesCss.test.ts` fails otherwise. `.grow` has a global `min-width: 200px` (settings forms) — never use it as
+  a flex spacer in a list row (it squeezed the inbox previews to nothing). The Unsent/Search lists are `.log-*`; `.feed`
+  is the For You page only (the two once shared `.feed`, which capped For You at 900 px).
+- Preview the web UI without a stack: serve `web/dist` from a small Node server that answers `/api/*` with fixture JSON
+  (state, chats, messages, feed window, stories) and screenshot it with puppeteer at 1280×820 and 390×844, light and dark.
 
 - TikTok answers a request it does not like with **200 and an empty body**; `WebApi.json` turns that into an error.
 - `/api/story/user_list/` needs `cursor` even on the first page (else `400 missing required fields`); items come from

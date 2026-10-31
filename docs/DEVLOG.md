@@ -1,5 +1,28 @@
 # DEVLOG — construction notes
 
+## 2026-10-31 — v1.14.0: the TikTok look (web UI + Android 0.5.0)
+
+The owner asked for the same as insta_logger got on 2026-10-27: make the web UI and the phone app look like the
+official TikTok UI.
+
+* **Reference.** The public tiktok.com pages (Explore, For You, login) were loaded in a local headless Chrome and
+  measured (computed styles + screenshots): body `TikTokFont` 14 px on `#000`/`#121212`; a 240 px sidebar with a 40 px
+  capsule search (`rgba(255,255,255,.13)`), 40–44 px items in bold ~17 px, the active one red (`rgb(255,59,92)` dark)
+  with a filled icon, a 72 px icon rail on narrow screens; the For You box rounded 16 px on black with the action column
+  (48 px round buttons, 12 px bold counts) and two 40 px round up/down buttons; the login page as one plain column with
+  4 px borderless grey fields and a 46 px full-width button. The logged-in messages page could not be measured (a
+  read-only style probe of the live tab was refused as a production read), so the inbox/chat follow TikTok's known
+  layout and the own-bubble colour is a guess kept in one token (`--out`, blue).
+* **Web.** TikTok Sans (`@fontsource/tiktok-sans`, OFL, local); new tokens; `Icon.tsx` replaced by outline icons with
+  solid `…Fill` twins; `MainLayout` = TikTok sidebar / app tab bar + Profile sheet; inbox, chat (avatar beside incoming
+  runs, centred time lines instead of times in bubbles, bare photos), composer, For You actions, login page restyled.
+* **Bugs found on the way.** `.feed` was used by both For You and the Unsent/Search lists (old rule `max-width: 900px`),
+  so For You never filled a wide screen — the lists are `.log-*` now. `.feed-body` on the Unsent page had no rule.
+  The global `.grow { min-width: 200px }` collapsed the inbox preview when used as a spacer.
+* **Test.** `storiesCss.test.ts` now also covers the navigation, feed-action, chat-row and composer class families and
+  reads class names out of template strings.
+* Android client 0.5.0 (`tiktok_logger_android`) got the same look natively (see its ARCHITECTURE/AGENTS).
+
 ## 2026-10-27 — v1.13.1: TZ never reached the browser
 
 Routing the VPS browser through a residential proxy made this visible: with `TZ=Asia/Jerusalem` in `.env` and the

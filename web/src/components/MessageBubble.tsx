@@ -7,7 +7,7 @@ import { findTiktokVideo, isOnlyLink } from '../lib/ttLinks';
 import { Icon } from './Icon';
 import { MessageMedia } from './MessageMedia';
 import { TikTokCard } from './TikTokCard';
-import { ErrorNote, Modal, Spinner } from './ui';
+import { Avatar, ErrorNote, Modal, Spinner } from './ui';
 
 const QUOTE_LABEL: Partial<Record<MessageType, string>> = {
   image: '📷 Photo',
@@ -168,6 +168,11 @@ export interface BubbleProps {
   selection?: { selected: boolean; onToggle: (messageId: string) => void };
   /** Message actions (reply, react, edit, unsend); not shown while selecting. */
   actions?: MessageActions;
+  /**
+   * Like TikTok's chat: the sender's avatar beside an incoming message — `show` on the first message of a run, an
+   * empty slot of the same width on the others so the bubbles line up.
+   */
+  avatar?: { id: string; name: string; url: string | null; show: boolean };
 }
 
 /** Downloaded photos and videos can be selected for "Download ZIP". */
@@ -180,7 +185,7 @@ function deletedLabel(msg: Message): string {
   return msg.deletedBy === 'missing' ? `Gone from TikTok · noticed ${when}` : `Unsent · ${when}`;
 }
 
-function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, actions }: BubbleProps) {
+function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, actions, avatar }: BubbleProps) {
   const [showEdits, setShowEdits] = useState(false);
 
   if (msg.type === 'system') {
@@ -194,7 +199,9 @@ function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, 
   }
 
   const deleted = msg.deletedAt !== null;
-  const classes = ['bubble', msg.fromMe ? 'out' : 'in', deleted ? 'deleted' : '', highlighted ? 'highlight' : '', msg.type === 'sticker' && msg.media?.url ? 'sticker' : '']
+  // Photos and videos without a caption or quote sit bare (rounded, no bubble behind them), as in TikTok's chat.
+  const bare = (msg.type === 'image' || msg.type === 'video') && msg.media?.status === 'downloaded' && !msg.text && !msg.quoted && !msg.forwarded && !deleted;
+  const classes = ['bubble', msg.fromMe ? 'out' : 'in', deleted ? 'deleted' : '', highlighted ? 'highlight' : '', msg.type === 'sticker' && msg.media?.url ? 'sticker' : '', bare ? 'bare' : '']
     .filter(Boolean)
     .join(' ');
 
@@ -205,7 +212,10 @@ function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, 
   const linkId = textLink?.id ?? null;
   const linkOnly = !!(textLink && isOnlyLink(msg.text, textLink.url));
 
-  const rowClass = [msg.fromMe ? 'msg-row out' : 'msg-row in', selection ? 'selectable' : '', selection?.selected ? 'selected' : ''].filter(Boolean).join(' ');
+  const withAvatar = !!avatar && !msg.fromMe && !selection;
+  const rowClass = [msg.fromMe ? 'msg-row out' : 'msg-row in', selection ? 'selectable' : '', selection?.selected ? 'selected' : '', withAvatar ? 'with-avatar' : '', showSender ? 'run-start' : '']
+    .filter(Boolean)
+    .join(' ');
   // While selecting, the whole row is one checkbox: clicks never reach the photo/video inside (CSS turns off
   // their pointer events), so nothing opens or plays by accident.
   const selectProps = selection
@@ -231,7 +241,12 @@ function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, 
           {selection.selected ? <Icon name="check" size={16} /> : null}
         </span>
       ) : null}
-      <div className={classes}>
+      {withAvatar && avatar.show ? (
+        <span className="msg-avatar">
+          <Avatar id={avatar.id} name={avatar.name} url={avatar.url} size={32} />
+        </span>
+      ) : null}
+      <div className={classes} title={formatDateTime(msg.ts)}>
         {actions && !selection && !deleted ? <ActionMenu msg={msg} actions={actions} /> : null}
         {deleted ? (
           <div className="deleted-banner" title={`${msg.deletedBy === 'missing' ? 'Noticed gone' : 'Unsent'} ${formatDateTime(msg.deletedAt!)}`}>
@@ -288,7 +303,7 @@ function BubbleImpl({ msg, isGroup, showSender, highlighted, onJump, selection, 
               <Icon name="edit" size={12} /> Edited{msg.editCount > 1 ? ` ×${msg.editCount}` : ''}
             </button>
           ) : null}
-          <span title={formatDateTime(msg.ts)}>{formatTime(msg.ts)}</span>
+          <span className="time">{formatTime(msg.ts)}</span>
           {msg.fromMe ? <Seen ack={msg.ack} /> : null}
         </div>
       </div>

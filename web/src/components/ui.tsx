@@ -127,3 +127,12 @@ export function EmptyState({ icon, title, children }: { icon: Parameters<typeof 
     </div>
   );
 }
+
+/** The app's own mark (the favicon: brand gradient + shield), as on the login page and in the sidebar. */
+export function BrandMark({ size = 40 }: { size?: number }) {
+  return (
+    <span className="brand-logo" style={{ width: size, height: size, borderRadius: size * 0.27 }}>
+      <Icon name="shieldFill" size={size * 0.62} />
+    </span>
+  );
+}

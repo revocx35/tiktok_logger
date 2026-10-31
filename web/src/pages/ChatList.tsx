@@ -63,13 +63,13 @@ export function ChatList({ activeId }: { activeId: string | null }) {
   };
 
   return (
-    <section className="chat-list" aria-label="Chats">
+    <section className="chat-list" aria-label="Messages">
       <header className="pane-head">
-        <h2>Chats</h2>
+        <h2>Messages</h2>
       </header>
       <form className="search-box" onSubmit={searchMessages} role="search">
         <Icon name="search" size={18} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search chats · Enter searches messages" aria-label="Search" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search · Enter searches messages" aria-label="Search" />
         {query ? (
           <button type="button" className="icon-btn small" onClick={() => setQuery('')} aria-label="Clear">
             <Icon name="close" size={16} />
@@ -96,11 +96,10 @@ export function ChatList({ activeId }: { activeId: string | null }) {
         ) : (
           visible.map((c) => (
             <button key={c.id} className={c.id === activeId ? 'chat-item active' : 'chat-item'} onClick={() => navigate(`/chat/${encodeURIComponent(c.id)}`)}>
-              <Avatar id={c.id} name={c.name} url={c.avatarUrl} kind={c.kind} />
+              <Avatar id={c.id} name={c.name} url={c.avatarUrl} kind={c.kind} size={56} />
               <span className="chat-item-body">
                 <span className="chat-item-top">
                   <span className="chat-name">{c.name}</span>
-                  <span className="chat-time">{formatListTime(c.lastTs)}</span>
                 </span>
                 <span className="chat-item-bottom">
                   <span className={c.lastMessage?.deleted ? 'chat-preview deleted' : 'chat-preview'}>
@@ -114,6 +113,7 @@ export function ChatList({ activeId }: { activeId: string | null }) {
                       <i className="muted">No messages logged</i>
                     )}
                   </span>
+                  {c.lastTs ? <span className="chat-time">· {formatListTime(c.lastTs)}</span> : null}
                   <span className="chat-badges">
                     {c.pinned ? <Icon name="pushpin" size={14} title="Pinned" /> : null}
                     {c.muted ? <Icon name="mute" size={14} title="Muted" /> : null}

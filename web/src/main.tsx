@@ -13,6 +13,10 @@ import { ChatsPage, DeletedPage, TikTokPage, NotFoundPage, SearchPage } from './
 import { SettingsPage } from './pages/Settings';
 import { SetupLinkPage } from './pages/SetupLink';
 import { AppStateProvider, useAppState } from './state/AppState';
+import '@fontsource/tiktok-sans/400.css';
+import '@fontsource/tiktok-sans/500.css';
+import '@fontsource/tiktok-sans/600.css';
+import '@fontsource/tiktok-sans/700.css';
 import './styles.css';
 
 const PUBLIC_WHEN_LOGGED_OUT = ['/login', '/recover'];

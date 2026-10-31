@@ -396,7 +396,25 @@ same pass and are **not** blocked (a publish with a bogus id answers 200 + `stat
 ## 5. Web UI — `web/`
 
 React 19 + Vite + TypeScript SPA, built into the server's static assets. No CDN, no external fonts, no inline scripts
-(strict CSP). `@novnc/novnc` for the TikTok screen, `qrcode` for TOTP enrollment.
+(strict CSP). `@novnc/novnc` for the TikTok screen, `qrcode` for TOTP enrollment, `@fontsource/tiktok-sans` for TikTok's
+own typeface (bundled, served from `'self'`; SIL OFL, `third_party/TikTokSans-OFL.txt`).
+
+**Look (v1.14, 2026-10-31):** styled after TikTok's own web UI and app, measured on the public tiktok.com pages
+(the logged-in messages page could not be inspected, so the chat colours are the closest known ones). Tokens in
+`styles.css`: TikTok's greys (`#161823` text, `rgba(22,24,35,.06)` / `#2f2f2f` fills, `#121212` dark background), its red
+`#fe2c55` for primary buttons and the active nav item (`#ff3b5c` in dark mode), 8 px radii, 4 px borderless grey fields,
+TikTok Sans. Own message bubbles use the single token `--out` (blue); incoming ones the grey fill.
+`components/Icon.tsx`: outline icons on a 24 px grid with a 2 px round stroke, plus solid `…Fill` twins that the active
+nav item uses, as TikTok does (the Android client generates its `WaIcons` from this file). Layout
+(`pages/MainLayout.tsx`): TikTok Web's sidebar — 240 px with the mark, a capsule *Search*, For You · Messages · Stories ·
+Unsent · TikTok · (Users) · Settings · More; folded to 72 px icons on the messages pages and under 1024 px — and under
+768 px the TikTok app's bottom tab bar (Home · Stories · Inbox · Unsent · Profile; Profile opens a sheet with the rest
+and log out; the bar turns black on For You). Messages: a 360 px inbox ("Messages", capsule search, text chips, 56 px
+avatars, "preview · time"), a chat with the sender's avatar beside incoming runs, 8 px bubbles with no time inside (the
+time is a centred line at each day and after a gap of an hour, and the bubble's tooltip), bare photos/videos, and a grey
+rounded composer with a red round send arrow. For You: the video in a 16 px-rounded box on black with TikTok's action
+column (avatar, solid like/comment/share icons in grey circles with bold counts) and the round up/down buttons beside
+it. Login: the mark top left and one plain centred "Log in" column.
 
 Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (chats), `/chat/:chatId`, `/feed`
 (For You), `/stories` (logged stories), `/deleted` ("Unsent"), `/search`, `/tiktok`, `/settings`, `/admin`. A route guard
@@ -406,7 +424,7 @@ Chat view: date separators; sender names in groups; text rendered as text (links
 quoted replies; media grid with lightbox, video player, audio player; a shared TikTok post (or a pasted TikTok link) as
 a card with the post's cover, author and a player (`components/TikTokCard.tsx`, see §4 "Chat post cards"); select
 photos/videos → one ZIP; infinite scroll; SSE live updates; per-chat and global search; composer with text, photo/video/
-audio and voice recording (MP4 or Ogg/Opus). Light and dark themes, single pane under 900 px.
+audio and voice recording (MP4 or Ogg/Opus). Light and dark themes, single pane under 768 px.
 
 Feed (`pages/Feed.tsx`): a full-height stage with the video (muted by default, click to unmute), author/caption/music and
 stats, a rail with like / comments / send / mute / open-on-TikTok, up/down arrows and `↑`/`↓` or `J`/`K`, a comments
@@ -615,11 +633,12 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
   and file, the encrypted identity, a manual check while the schedule is off); `tt/items.test.ts` (the live
   `item/detail` shape, a photo post, a gone post, the media routes, caching) and `api/messageType.test.ts` (the stored
   type → `MessageType` translation and the share card of a shared post).
-* `web` (16 tests): vitest for the text renderer, the Opus/OGG recorder and the TikTok link reader (`lib/ttLinks`),
+* `web` (18 tests): vitest for the text renderer, the Opus/OGG recorder and the TikTok link reader (`lib/ttLinks`),
   plus `pages/storiesCss.test.ts` —
-  every `story-*`/`page-*` class the markup uses has a rule in `styles.css` and every `story-*` rule is used by
-  markup (a renamed class in a ported page is invisible to the type-check and the build); typecheck, production
-  build.
+  every `story-*`/`page-*`/`rail-*`/`tab-*`/`more-*`/`feed-*`/`msg-*`/`compose-*`/`chat-*`/`log-*` class the markup uses
+  (in `className` and in template strings) has a rule in `styles.css`, and every `story-*`/`rail-*`/`tab-*`/`more-*`/
+  `feed-act-*` rule is used by markup (a renamed class in a ported page is invisible to the type-check and the build);
+  typecheck, production build.
 * `chromium/manager`: `CGO_ENABLED=0 go test ./...` (tokens shared with `supervisor/tokens.ts`, route allowlist, VNC
   tunnel), also run in the image build.
 * `scripts/dev/dom-check.mts` (dev, needs a Chromium): the page agent against the fake TikTok, with and without

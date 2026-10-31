@@ -17,7 +17,9 @@ import { describe, expect, it } from 'vitest';
  */
 
 const SRC = fileURLToPath(new URL('../', import.meta.url));
-const CLASS = /^(?:stories|story|page|tt-card)-[a-z-]*$/;
+// Since the TikTok look (2026-10-31) also the navigation (sidebar, tab bar, More menu), the feed's action column, the
+// chat rows and the composer: classes that were renamed or added together with their rules.
+const CLASS = /^(?:(?:stories|story|page|tt-card|rail|tab|more|feed|msg|compose|chat|auth|log)-[a-z-]*|wordmark|brand-logo|log-list)$/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -40,6 +42,14 @@ function usedClasses(): Map<string, Set<string>> {
         used.get(token)!.add(file.slice(SRC.length));
       }
     }
+    // Class names built in template strings (`rail-item${active ? ' active' : ''}`).
+    for (const match of source.matchAll(/`([^`]*)`/g)) {
+      for (const token of match[1]!.match(/[a-z][a-z0-9-]*/g) ?? []) {
+        if (!CLASS.test(token)) continue;
+        if (!used.has(token)) used.set(token, new Set());
+        used.get(token)!.add(file.slice(SRC.length));
+      }
+    }
   }
   return used;
 }
@@ -56,7 +66,7 @@ describe('stories CSS', () => {
   });
 
   it('uses every story class styles.css declares', () => {
-    const declared = new Set([...css.matchAll(/\.((?:stories?|tt-card)-[a-z-]+)/g)].map((m) => m[1]!));
+    const declared = new Set([...css.matchAll(/\.((?:stories?|tt-card|rail|tab|more|feed-act|msg-avatar|compose-field)(?:-[a-z-]+)?)/g)].map((m) => m[1]!).filter((c) => CLASS.test(c)));
     const dead = [...declared].filter((cls) => !used.has(cls)).sort();
     expect(dead, `declared in styles.css but no markup uses: ${dead.join(', ')}`).toEqual([]);
   });

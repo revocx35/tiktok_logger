@@ -26,7 +26,7 @@ and stores it encrypted on your disk. You can also send messages from the web UI
 | Keeps | everything encrypted on your server, including media files, in an SQLite database + media folder |
 | Notices | unsent messages, TikTok's "message deleted" lines, edited/deleted media |
 | Sends | text, photos, videos, audio (from the composer), with "seen" only when you reply (configurable) |
-| Shows | conversation list, chat view with search, an "Unsent" feed, one ZIP per selection of media |
+| Shows | conversation list, chat view with search, an "Unsent" feed, one ZIP per selection of media — in a UI that looks like TikTok's own (sidebar on the web, tab bar on phones, TikTok Sans) |
 | Feed | browses TikTok's For You, likes/unlikes, reads and posts comments, sends a video's link into a chat |
 | Stories | logs the 24-hour stories of the accounts you follow (photo and video, encrypted, off by default) and downloads them — one story or all of them as a ZIP |
 | Users | admin + up to `MAX_USERS`, each with their own TikTok account, keys and browser; separate ports possible |
