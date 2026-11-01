@@ -105,3 +105,5 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 - The IM SDK of TikTok's web client writes messages to its **WebSocket**, so `fetch`/XHR hooks capture nothing: use CDP
   `Network.webSocketFrameSent` on a tab while driving the real UI, then decode the frame (field 1 = command, envelope in
   field 8, body at 8.8.100, content JSON in 8.8.100.4).
+- The worker decides "is this an /internal route" from the raw URL *and* the matched route (`req.routeOptions.url`): the
+  router percent-decodes, so `/%69nternal/info` used to reach an /internal handler with only the forwarded worker token.
