@@ -66,14 +66,14 @@ const EXT: Record<string, string> = {
   'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'application/pdf': 'pdf',
 };
 
-/** Name inside a ZIP: the original file name if there was one, else e.g. "ig_photo_2026-10-10_13-05-22.jpg" (UTC). */
+/** Name inside a ZIP: the original file name if there was one, else e.g. "tt_photo_2026-10-10_13-05-22.jpg" (UTC). */
 export function zipEntryName(msg: Pick<MessageRow, 'type' | 'ts'>, mime: string | null, filename: string | null): string {
   if (filename) return safeFilename(filename, 'file');
   const base = (mime ?? '').split(';')[0]!.trim().toLowerCase();
   const ext = EXT[base] ?? 'bin';
   const kind = msg.type === 'image' ? 'photo' : msg.type === 'video' || msg.type === 'gif' ? 'video' : msg.type === 'sticker' ? 'sticker' : 'file';
   const stamp = new Date(msg.ts).toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
-  return `ig_${kind}_${stamp}.${ext}`;
+  return `tt_${kind}_${stamp}.${ext}`;
 }
 
 /**
