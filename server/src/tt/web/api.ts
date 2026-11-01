@@ -25,6 +25,12 @@ export class WebApi {
     return { status: r.status, text: r.text };
   }
 
+  /** The logged-in account as the page knows it (`webapp.app-context.user`), or null on a page without it. */
+  async identity(): Promise<{ uniqueId: string; secUid: string } | null> {
+    const r = await this.page.evaluate(identityInPage);
+    return r && /^[A-Za-z0-9_.]{1,40}$/.test(r.uniqueId) && /^[A-Za-z0-9_-]{10,200}$/.test(r.secUid) ? r : null;
+  }
+
   /** The JSON answer when TikTok accepted the call (`status_code` 0); throws with TikTok's reason otherwise. */
   async json<T = Record<string, unknown>>(method: 'GET' | 'POST', path: string, extra: Record<string, string>): Promise<T> {
     const r = await this.call(method, path, extra);
@@ -51,6 +57,16 @@ export class WebApiError extends Error {
     readonly code?: number,
   ) {
     super(message);
+  }
+}
+
+function identityInPage(): { uniqueId: string; secUid: string } | null {
+  try {
+    const el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
+    const u = (JSON.parse(el?.textContent ?? '{}') as { __DEFAULT_SCOPE__?: Record<string, { user?: { uniqueId?: unknown; secUid?: unknown } }> }).__DEFAULT_SCOPE__?.['webapp.app-context']?.user;
+    return typeof u?.uniqueId === 'string' && typeof u.secUid === 'string' ? { uniqueId: u.uniqueId, secUid: u.secUid } : null;
+  } catch {
+    return null;
   }
 }
 

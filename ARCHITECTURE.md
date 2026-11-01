@@ -358,12 +358,39 @@ if the API fails.
 `tt-ticket-guard-*` headers (`client-data`, `public-key`, version) onto the requests it makes itself, and a plain `fetch`
 from the page does not get them — every parameter variant (`aweme_id`, `item_id`, with/without `type`/`from_page`)
 answered 403, while a click on the page's like control answered 200 and moved the count. So `ApiFeed.like` delegates to
-`FeedService.likeOnVideo`, which puts the video on screen and uses `FeedAgent.like`:
-the item is used in place when the page's For You list already renders it, otherwise the feed window opens the video's own
-page (`/@author/video/<id>`, `videoPageUrl`) — our order comes from the API, the page's is its own, so an item further
-ahead cannot be reached by scrolling. Both paths read the state back from `aria-pressed` on the like button and report
+`FeedService.likeOnVideo`: the item is used in place when the page's For You list already renders it, otherwise the
+video is opened **from its author's profile grid** (`PageActions.openVideo`, v1.15) — our order comes from the API, the
+page's is its own, so an item further ahead cannot be reached by scrolling. (Until v1.14 this opened the video's own page
+`/@author/video/<id>`; since 2026-10 TikTok answers that document load with **403 "Access denied"** for this browser.) Both paths read the state back from `aria-pressed` on the like button and report
 what the page shows, and a 409 (`feed_moved`) from the page reaches the client unchanged. Comments were checked in the
 same pass and are **not** blocked (a publish with a bogus id answers 200 + `status_code`), so they stay on the API.
+
+### Profiles, follows, reposts, comment threads, downloads (`tt/feedApi.ts`, `tt/pageActions.ts`, `api/social.ts`, v1.15)
+
+`ApiFeed` also implements `TtSocial` (`ctx.tt.social`; web API only, no page fallback). Measured live on 2026-10-31:
+
+| What | How | Why |
+|---|---|---|
+| Profile | `GET /api/user/detail/?uniqueId=` → `userInfo.{user,stats}` | read-only web API; `relation` 0 none · 1 following · 2 friends |
+| A profile's lists | `/api/post/item_list/` · `/api/repost/item_list/` · `/api/favorite/item_list/` (liked) · `/api/user/collect/item_list/` (favorites), `?secUid=&cursor=&count=16` | the owner gets all four, others videos + reposts; items go into a second `FeedCatalog` (`seen`) so every `/api/feed/:id/*` route works on them |
+| The owner | `webapp.app-context.user` in the messages page (`WebApi.identity()`) | no extra request |
+| Replies | `GET /api/comment/list/reply/?comment_id=&item_id=&cursor=` | read-only |
+| Reply | `POST /api/comment/publish/` + `reply_id` (thread's comment) + `reply_to_reply_id` (`"0"` or the reply answered) | the fields TikTok's own comment box sends (webapp bundle) |
+| Comment like | `POST /api/comment/digg/?cid=&digg_type=1` (like) / `2` (unlike) | not behind the ticket guard (live: 200 + `user_digged` flips) |
+| Follow | **click** the profile header's `[data-e2e="follow-button"]` (the one next to `user-title`), read its text back | the API answers `10402 invalid csrf token`; TikTok's own call carries `tt-ticket-guard-*` + `x-secsdk-csrf-token` |
+| Repost | **click** `[data-e2e="video-share-repost"]` in the browse view, `aria-label` "Repost" ⇄ "Remove repost" | `/tiktok/v1/upvote/publish` carries the ticket guard |
+| Like (not on /foryou) | **click** `browse-like-icon`, state = the enclosing button's `aria-pressed` | see above |
+| Download | the player's own cached bytes, `GET /api/feed/:id/download` with `Content-Disposition: attachment` | no second download |
+| Captions | `video.subtitleInfos[]` (`Format: webvtt`, `LanguageCodeName`) → app refs served as `text/vtt` **only if the body starts with `WEBVTT`** | a `<track>` / ExoPlayer side-loaded subtitle |
+
+The clicks run in the feed window, one at a time (`FeedService.run`): `PageActions` loads `/@author` (a profile page
+loads fine), finds `a[href*="/video/<id>"]` in the grid (scrolling up to 14 pages), clicks it — TikTok opens its browse
+view in place, no document load — waits for the control (it is drawn ~0.5 s after the video), clicks once and polls the
+state. A video that is not on the author's profile is a 409 `not_on_profile`; a private account a 409 `private`.
+TikTok's `relation` lags a fresh follow by minutes, so `ApiFeed` remembers its own follow results for 15 minutes.
+Follows and reposts are audited (`tt_follow`/`tt_unfollow`/`tt_repost`/`tt_unrepost`, no names) and rate-limited to 20 a
+minute. `scripts/dev/social-check.mts` runs the real classes against the live browser (reads; `--act` likes, reposts,
+follows and comment-likes on a public account and undoes each).
 
 ### Feed, page-driving fallback (`tt/feed.ts`, `tt/feedAgent.ts`, `api/feed.ts`)
 
@@ -417,8 +444,16 @@ column (avatar, solid like/comment/share icons in grey circles with bold counts)
 it. Login: the mark top left and one plain centred "Log in" column.
 
 Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (chats), `/chat/:chatId`, `/feed`
-(For You), `/stories` (logged stories), `/deleted` ("Unsent"), `/search`, `/tiktok`, `/settings`, `/admin`. A route guard
-uses `GET /api/state`.
+(For You), `/stories` (logged stories), `/me` and `/profile/:username` (profiles, v1.15), `/deleted` ("Unsent"), `/search`,
+`/tiktok`, `/settings`, `/admin`. A route guard uses `GET /api/state`.
+
+The video player (`components/VideoStack.tsx`, v1.15) is shared by For You and a profile's videos: a snapping scroller
+with TikTok's action column (author → profile with a follow badge, like, comments, repost, send, save, sound, open) and a
+player row (play/pause, seek bar, speed 1/1.5/2/0.5/0.75×, TikTok's WebVTT captions via `<track>`; a click on the video
+pauses). The comments panel has threads ("View N replies", reply to a comment or to a reply) and comment likes. The
+profile page (`pages/Profile.tsx`) is TikTok's: avatar, handle, Follow/Following/Friends, Following · Followers · Likes,
+bio and link, the list tabs and a grid that loads the next page at its end; a tile opens the list full screen in the
+player.
 
 Chat view: date separators; sender names in groups; text rendered as text (links and @mentions only, never HTML);
 quoted replies; media grid with lightbox, video player, audio player; a shared TikTok post (or a pasted TikTok link) as
@@ -586,7 +621,14 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | POST | /api/feed/step | ✓ | `{dir: next\|prev}` → `{item}` |
 | POST | /api/feed/:id/like | ✓ | `{like}` → `{liked}` (TikTok's own control) |
 | GET · POST | /api/feed/:id/comments · /api/feed/:id/comment | ✓ | `{comments}` · posts `{text}` (≤150) |
-| GET | /api/feed/media/:ref | ✓ | the video/poster/avatar from the server's cache, with `Content-Length`, Range (206) and an ETag |
+| GET | /api/feed/media/:ref | ✓ | the video/poster/avatar/caption from the server's cache, with `Content-Length`, Range (206) and an ETag |
+| POST | /api/feed/:id/repost | ✓ | `{repost}` → `{reposted}` (TikTok's own control) |
+| GET | /api/feed/:id/download | ✓ | the video as an attachment (`tiktok-<author>-<id>.mp4`) |
+| GET · POST | /api/feed/:id/comments/:cid/replies?cursor= · /reply | ✓ | `FeedReplyPage` · posts `{text, toReply?}` |
+| POST | /api/feed/:id/comments/:cid/like | ✓ | `{like}` → `{liked}` |
+| GET | /api/profiles/me · /api/profiles/:username | ✓ | `TtProfile` |
+| GET | /api/profiles/:username/videos?tab=videos\|reposts\|liked\|favorites&cursor= | ✓ | `ProfileVideoPage` (`me` for the owner; liked/favorites only there) |
+| POST | /api/profiles/:username/follow | ✓ | `{follow}` → `{following}` (TikTok's own button) |
 | GET | /api/items/:id | ✓ | `TtItem`: one post resolved through the tab (`/api/item/detail/?itemId=`), its media as app URLs |
 | GET | /api/items/:id/media/video · /media/cover | ✓ | the post's video (ranged, 206) or cover, downloaded once through the page and cached |
 | GET | /api/stories/status · /api/stories/authors · /api/stories/accounts · /api/stories?user=&before=&limit= | ✓ | story logging status, authors with items, every account seen in the bar, `StoryPage` |
@@ -623,19 +665,21 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
 
 ## 10. Testing
 
-* `server` (vitest, 205 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
+* `server` (vitest, 253 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
   hardening; `tt/frames.test.ts` (protobuf walk, JSON recovery, bounds, IM URL/socket detection);
   `tt/mapper.test.ts` (TikTok answer shapes, content JSON, stickers/media, junk rejection, DOM rows, stable ids);
   `tt/ingest.test.ts` (encrypted storage with no plaintext in the file, DOM/network merge, album parts, idempotency,
   anti-delete with its 60 s rule, reactions, own messages); `tt/im/` (wire codec, message shapes, engine import and
-  catch-up); `tt/feedApi.test.ts` (the API feed and its comments); `tt/stories.test.ts` (tray/batch parsers over the
+  catch-up); `tt/feedApi.test.ts` (the API feed and its comments; v1.15 profiles, lists, follow memory, repost, replies,
+  comment likes); `api/social.test.ts` (the v1.15 routes: auth, CSRF, validation before the browser, the download
+  headers); `tt/pageActions.test.ts` (follow/repost state reading); `tt/stories.test.ts` (tray/batch parsers over the
   live shapes, a photo story, an item without media, the delay bounds, stored-once, the retention sweep deleting story
   and file, the encrypted identity, a manual check while the schedule is off); `tt/items.test.ts` (the live
   `item/detail` shape, a photo post, a gone post, the media routes, caching) and `api/messageType.test.ts` (the stored
   type → `MessageType` translation and the share card of a shared post).
 * `web` (18 tests): vitest for the text renderer, the Opus/OGG recorder and the TikTok link reader (`lib/ttLinks`),
   plus `pages/storiesCss.test.ts` —
-  every `story-*`/`page-*`/`rail-*`/`tab-*`/`more-*`/`feed-*`/`msg-*`/`compose-*`/`chat-*`/`log-*` class the markup uses
+  every `story-*`/`page-*`/`rail-*`/`tab-*`/`more-*`/`feed-*`/`msg-*`/`compose-*`/`chat-*`/`log-*`/`profile-*` class the markup uses
   (in `className` and in template strings) has a rule in `styles.css`, and every `story-*`/`rail-*`/`tab-*`/`more-*`/
   `feed-act-*` rule is used by markup (a renamed class in a ported page is invisible to the type-check and the build);
   typecheck, production build.

@@ -38,6 +38,10 @@ import type {
   FeedItem,
   FeedComment,
   FeedCommentPage,
+  FeedReplyPage,
+  ProfileTab,
+  ProfileVideoPage,
+  TtProfile,
 } from '../../../shared/api';
 
 export class ApiError extends Error {
@@ -163,6 +167,17 @@ export const api = {
   feedComments: (id: string) => request<FeedCommentPage>('GET', `/api/feed/${enc(id)}/comments`),
   feedComment: (id: string, text: string) => request<FeedCommentPage>('POST', `/api/feed/${enc(id)}/comment`, { text }),
   feedCloseComments: () => request<{ ok: true }>('POST', '/api/feed/comments/close'),
+  feedRepost: (id: string, repost: boolean) => request<{ reposted: boolean }>('POST', `/api/feed/${enc(id)}/repost`, { repost }),
+  feedReplies: (id: string, cid: string, cursor?: string | null) =>
+    request<FeedReplyPage>('GET', `/api/feed/${enc(id)}/comments/${enc(cid)}/replies${cursor ? `?cursor=${enc(cursor)}` : ''}`),
+  feedReply: (id: string, cid: string, text: string, toReply?: string | null) =>
+    request<FeedReplyPage>('POST', `/api/feed/${enc(id)}/comments/${enc(cid)}/reply`, { text, ...(toReply ? { toReply } : {}) }),
+  feedCommentLike: (id: string, cid: string, like: boolean) => request<{ liked: boolean }>('POST', `/api/feed/${enc(id)}/comments/${enc(cid)}/like`, { like }),
+
+  profile: (username: string | 'me') => request<TtProfile>('GET', username === 'me' ? '/api/profiles/me' : `/api/profiles/${enc(username)}`),
+  profileVideos: (username: string | 'me', tab: ProfileTab, cursor?: string | null) =>
+    request<ProfileVideoPage>('GET', `/api/profiles/${enc(username)}/videos?tab=${tab}${cursor ? `&cursor=${enc(cursor)}` : ''}`),
+  follow: (username: string, follow: boolean) => request<{ following: boolean }>('POST', `/api/profiles/${enc(username)}/follow`, { follow }),
   messages: (chatId: string, before?: string | null, limit = 60) =>
     request<MessagePage>('GET', `/api/chats/${enc(chatId)}/messages?limit=${limit}${before ? `&before=${enc(before)}` : ''}`),
   messagesAfter: (chatId: string, after: string, limit = 100) =>

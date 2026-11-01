@@ -1,4 +1,4 @@
-import type { FeedComment, FeedItem, StoryStatus, TtItem, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
+import type { FeedComment, FeedItem, FeedReplyPage, ProfileTab, ProfileVideoPage, TtProfile, StoryStatus, TtItem, TtStatus, SendMediaKind, SendResult } from '../../shared/api.js';
 import type { Config } from './config.js';
 import type { SessionCookie } from './tt/cookies.js';
 import type { ShareArgs } from './tt/im/proto.js';
@@ -43,6 +43,23 @@ export interface TtFeed {
   mediaOf(ref: string): Promise<{ mime: string; data: Buffer } | null>;
   mediaCached(ref: string): boolean;
   mediaStats(): { refs: number; cached: number; bytes: number; inflight: number };
+}
+
+/**
+ * Profiles, follows, reposts, comment threads and downloads (v1.15) — through the web API from the messages tab, and
+ * TikTok's own controls in the feed window where a request needs its ticket guard. Nothing of it is stored.
+ */
+export interface TtSocial {
+  /** A profile by username; `me` = the logged-in account. */
+  profile(username: string | 'me'): Promise<TtProfile>;
+  profileVideos(username: string | 'me', tab: ProfileTab, cursor: string | null): Promise<ProfileVideoPage>;
+  follow(username: string, want: boolean): Promise<{ following: boolean }>;
+  repost(id: string, want: boolean): Promise<{ reposted: boolean }>;
+  replies(id: string, commentId: string, cursor: string | null): Promise<FeedReplyPage>;
+  reply(id: string, commentId: string, text: string, toReply: string | null): Promise<FeedReplyPage>;
+  likeComment(id: string, commentId: string, want: boolean): Promise<{ liked: boolean }>;
+  /** The video's bytes for saving, with a file name (`tiktok-<author>-<id>.mp4`). */
+  download(id: string): Promise<{ mime: string; data: Buffer; filename: string }>;
 }
 
 /** Story logging (see tt/stories.ts), used by the HTTP layer. */
@@ -91,6 +108,7 @@ export interface TtController {
   stop(): Promise<void>;
   readonly sender: TtSender;
   readonly feed: TtFeed;
+  readonly social: TtSocial;
   readonly stories: TtStories;
   readonly items: TtItemsApi;
 }
@@ -168,6 +186,16 @@ export class NullTt implements TtController {
     mediaOf: async () => null,
     mediaCached: () => false,
     mediaStats: () => ({ refs: 0, cached: 0, bytes: 0, inflight: 0 }),
+  };
+  readonly social: TtSocial = {
+    profile: notConnected,
+    profileVideos: notConnected,
+    follow: notConnected,
+    repost: notConnected,
+    replies: notConnected,
+    reply: notConnected,
+    likeComment: notConnected,
+    download: notConnected,
   };
   readonly stories: TtStories = {
     status: () => ({ logging: false, lastCheckAt: null, nextCheckAt: null, lastResult: 'TikTok is not connected.', authors: 0, items: 0, pending: 0, downloaded: 0 }),

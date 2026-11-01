@@ -94,7 +94,7 @@ export interface Harness {
 
 export async function makeHarness(
   env: Record<string, string> = {},
-  opts: { ig?: (ctx: AppContext) => TtController; routes?: (app: FastifyInstance, ctx: AppContext) => void } = {},
+  opts: { tt?: (ctx: AppContext) => TtController; routes?: (app: FastifyInstance, ctx: AppContext) => void } = {},
 ): Promise<Harness> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ttl-test-'));
   const config = loadConfig(

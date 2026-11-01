@@ -53,7 +53,8 @@ describe('ApiFeed', () => {
   let api: ReturnType<typeof fakeApi>;
   let feed: ApiFeed;
   /** The page path that clicks TikTok's own like control; a like is only as real as what that reports. */
-  let likePage: { calls: { id: string; want: boolean }[]; answer: (id: string, want: boolean) => Promise<{ liked: boolean }> };
+  let likePage: { calls: { id: string; want: boolean; author?: string | null }[]; answer: (id: string, want: boolean) => Promise<{ liked: boolean }> };
+  let clicks: { reposts: { id: string; author: string; want: boolean }[]; follows: { username: string; want: boolean }[] };
 
   beforeEach(async () => {
     const made = await makeCtx();
@@ -61,10 +62,16 @@ describe('ApiFeed', () => {
     cleanup = made.cleanup;
     api = fakeApi();
     likePage = { calls: [], answer: (id2, want) => Promise.resolve({ liked: want }) };
-    feed = new ApiFeed(ctx, () => api as unknown as WebApi, () => null, (vid, want) => {
-      likePage.calls.push({ id: vid, want });
-      return likePage.answer(vid, want);
+    clicks = { reposts: [], follows: [] };
+    feed = new ApiFeed(ctx, () => api as unknown as WebApi, () => null, {
+      like: (vid, _author, want) => {
+        likePage.calls.push({ id: vid, want });
+        return likePage.answer(vid, want);
+      },
+      repost: async (vid, author, want) => (clicks.reposts.push({ id: vid, author, want }), { reposted: want }),
+      follow: async (username, want) => (clicks.follows.push({ username, want }), { following: want }),
     });
+    (api as unknown as { identity: () => Promise<unknown> }).identity = async () => ({ uniqueId: 'owner', secUid: 'MS4wOwnerSecUid000' });
   });
   afterEach(async () => {
     await cleanup();
@@ -180,8 +187,98 @@ describe('ApiFeed', () => {
   });
 
   it('is unavailable (not broken) while TikTok is not connected', async () => {
-    const off = new ApiFeed(ctx, () => null, () => null, () => Promise.reject(new Error('no page')));
+    const no = () => Promise.reject(new Error('no page'));
+    const off = new ApiFeed(ctx, () => null, () => null, { like: no, repost: no, follow: no });
     await expect(off.window()).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(off.profile('me')).rejects.toMatchObject({ code: 'unavailable' });
+  });
+
+  /* ------------------------------------------------------------- v1.15 social */
+
+  const detail = (uniqueId: string, relation: number, extra: Record<string, unknown> = {}) => ({
+    status_code: 0,
+    userInfo: {
+      user: { id: '6' + '1'.repeat(17), uniqueId, nickname: uniqueId.toUpperCase(), secUid: `MS4w${uniqueId}SecUid0000`, signature: 'bio', avatarMedium: 'https://p16.tiktokcdn.com/av.jpeg', relation, verified: true, privateAccount: false, bioLink: { link: 'example.com' }, ...extra },
+      stats: { followerCount: 10, followingCount: 2, heartCount: 99, videoCount: 7 },
+    },
+  });
+
+  it('reads a profile: relation 1/2 = following, 0 = not; the owner sees all four lists, others two', async () => {
+    api.answers.set('/api/user/detail/', (x) => detail(x.uniqueId!, x.uniqueId === 'friend' ? 2 : x.uniqueId === 'idol' ? 1 : 0));
+    const p = await feed.profile('friend');
+    expect(p).toMatchObject({ username: 'friend', following: true, friends: true, me: false, tabs: ['videos', 'reposts'], link: 'https://example.com', stats: { followers: 10, likes: 99, videos: 7 } });
+    expect(p.avatar).toMatch(/^\/api\/feed\/media\/[0-9a-f]{24}$/);
+    expect(await feed.profile('idol')).toMatchObject({ following: true, friends: false });
+    expect(await feed.profile('stranger')).toMatchObject({ following: false });
+    const me = await feed.profile('me');
+    expect(api.calls.at(-1)).toMatchObject({ path: '/api/user/detail/', extra: { uniqueId: 'owner' } });
+    expect(me).toMatchObject({ me: true, following: null, tabs: ['videos', 'reposts', 'liked', 'favorites'] });
+    await expect(feed.profile('../etc')).rejects.toMatchObject({ code: 'validation' });
+  });
+
+  it("lists a profile's videos by secUid, pages by cursor, and keeps them playable through the feed routes", async () => {
+    api.answers.set('/api/user/detail/', (x) => detail(x.uniqueId!, 0));
+    api.answers.set('/api/post/item_list/', (x) => ({ status_code: 0, itemList: [item(40), { ...item(41), item_control: { can_repost: false }, video: { ...item(41).video, subtitleInfos: [{ Url: 'https://v16-webapp.tiktok.com/sub.vtt', Format: 'webvtt', LanguageCodeName: 'eng-US' }] } }], cursor: x.cursor === '0' ? '1730000000000' : '0', hasMore: x.cursor === '0' }));
+    const page = await feed.profileVideos('someone', 'videos', null);
+    expect(api.calls.find((c) => c.path === '/api/post/item_list/')).toMatchObject({ extra: { secUid: 'MS4wsomeoneSecUid0000', cursor: '0' } });
+    expect(page).toMatchObject({ cursor: '1730000000000', more: true });
+    expect(page.items.map((i) => i.id)).toEqual([id(40), id(41)]);
+    expect(page.items[1]).toMatchObject({ canRepost: false, video: { download: `/api/feed/${id(41)}/download`, captions: [{ lang: 'eng-US' }] } });
+    expect(page.items[1]!.video!.captions![0]!.src).toMatch(/^\/api\/feed\/media\/[0-9a-f]{24}$/);
+    expect((await feed.profileVideos('someone', 'videos', '1730000000000')).more).toBe(false);
+    // Liked and favourites are the owner's own lists.
+    await expect(feed.profileVideos('someone', 'liked', null)).rejects.toMatchObject({ code: 'forbidden' });
+    api.answers.set('/api/repost/item_list/', () => ({ status_code: 0, itemList: [item(50)], cursor: '0', hasMore: false }));
+    const mine = await feed.profileVideos('me', 'reposts', null);
+    expect(api.calls.at(-1)).toMatchObject({ path: '/api/repost/item_list/', extra: { secUid: 'MS4wOwnerSecUid000' } });
+    expect(mine.items[0]).toMatchObject({ reposted: true });
+    // A profile video is known to the feed routes: share, repost and download find it.
+    await feed.repost(id(50), true);
+    expect(clicks.reposts).toHaveLength(0); // already reposted: nothing is clicked
+    await expect(feed.repost(id(41), true)).rejects.toMatchObject({ code: 'no_repost' });
+  });
+
+  it('reposts and follows through the page controls, audits them, and remembers the follow over TikTok\'s stale relation', async () => {
+    await feed.window(3);
+    expect(await feed.repost(id(2), true)).toEqual({ reposted: true });
+    expect(clicks.reposts).toEqual([{ id: id(2), author: 'user2', want: true }]);
+    expect((await feed.goto(id(2))).items[0]).toMatchObject({ reposted: true });
+    await feed.repost(id(2), true);
+    expect(clicks.reposts).toHaveLength(1);
+
+    api.answers.set('/api/user/detail/', (x) => detail(x.uniqueId!, 0)); // TikTok still says 0 right after a follow
+    expect(await feed.follow('user2', true)).toEqual({ following: true });
+    expect(clicks.follows).toEqual([{ username: 'user2', want: true }]);
+    expect(await feed.profile('user2')).toMatchObject({ following: true });
+    expect((await feed.goto(id(2))).items[0]!.author.following).toBe(true);
+    await expect(feed.follow('owner', true)).rejects.toMatchObject({ code: 'validation' });
+    const events = ctx.repo.listAudit(10).map((a) => a.event);
+    expect(events).toContain('tt_repost');
+    expect(events).toContain('tt_follow');
+  });
+
+  it('reads and posts replies with the fields TikTok\'s comment box sends, and likes a comment with digg_type 1/2', async () => {
+    api.answers.set('/api/comment/list/reply/', (x) => ({ status_code: 0, comments: [{ cid: '7' + '2'.repeat(17), text: 'r1', user_digged: 1, user: { unique_id: 'b' } }], cursor: 20, has_more: x.cursor === '0' ? 1 : 0 }));
+    const cid = '7' + '1'.repeat(17);
+    const r = await feed.replies(id(1), cid, null);
+    expect(api.calls.at(-1)).toMatchObject({ path: '/api/comment/list/reply/', extra: { comment_id: cid, item_id: id(1), cursor: '0' } });
+    expect(r).toMatchObject({ cursor: '20', more: true, comments: [{ text: 'r1', liked: true }] });
+
+    api.answers.set('/api/comment/publish/', () => ({ status_code: 0, comment: { cid: '7' + '3'.repeat(17), text: 'hi', user: {} } }));
+    const after = await feed.reply(id(1), cid, ' hi ', null);
+    expect(api.calls.find((c) => c.path === '/api/comment/publish/')).toMatchObject({ extra: { aweme_id: id(1), text: 'hi', reply_id: cid, reply_to_reply_id: '0' } });
+    expect(after.comments.map((c) => c.text)).toEqual(['r1', 'hi']);
+
+    api.answers.set('/api/comment/digg/', () => ({ status_code: 0 }));
+    await feed.likeComment(id(1), cid, true);
+    expect(api.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/comment/digg/', extra: { cid, digg_type: '1' } });
+    await feed.likeComment(id(1), cid, false);
+    expect(api.calls.at(-1)).toMatchObject({ extra: { digg_type: '2' } });
+  });
+
+  it('marks liked comments and carries the reply total', async () => {
+    api.answers.set('/api/comment/list/', () => ({ status_code: 0, comments: [{ cid: 'c1', text: 'x', user_digged: 1, reply_comment_total: 12, user: {} }] }));
+    expect((await feed.comments(id(1)))[0]).toMatchObject({ liked: true, replyCount: 12 });
   });
 });
 

@@ -1,7 +1,7 @@
 import type { Browser, Page } from 'puppeteer';
 import puppeteer from 'puppeteer';
 import type { SendMediaKind, SendResult, TtState, TtStatus } from '../../../shared/api.js';
-import type { AppContext, PageProbe, TtController, TtDiagnostics, TtFeed, TtSender } from '../context.js';
+import type { AppContext, PageProbe, TtController, TtDiagnostics, TtFeed, TtSender, TtSocial } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import { maskId } from '../log.js';
 import { classifyUrl, closeOtherTabs, pickTikTokTab } from './browser.js';
@@ -76,6 +76,8 @@ export class TtService implements TtController, ChatDriver {
   readonly sync: Sync;
   /** The feed the HTTP layer talks to: the web API when it is active, else the page-driving one. */
   readonly feed: TtFeed;
+  /** Profiles, follows, reposts, comment threads and downloads: web API only (no page-driving fallback). */
+  readonly social: TtSocial;
   private readonly pageFeed: FeedService;
   private readonly apiFeed: ApiFeed;
   private webApiRef: WebApi | null = null;
@@ -109,7 +111,12 @@ export class TtService implements TtController, ChatDriver {
     this.ingest = new Ingest(ctx, ctx.events, this.sources, this.media);
     this.sender = new Sender(ctx, this.ingest, this);
     this.pageFeed = new FeedService(ctx, { feedPage: () => this.feedPage() }, this.feedCatalog);
-    this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef, (id, want) => this.pageFeed.likeOnVideo(id, want));
+    this.apiFeed = new ApiFeed(ctx, () => this.webApiRef, () => this.downloaderRef, {
+      like: (id, author, want) => this.pageFeed.likeOnVideo(id, author, want),
+      repost: (id, author, want) => this.pageFeed.repostOnVideo(id, author, want),
+      follow: (username, want) => this.pageFeed.followOnProfile(username, want),
+    });
+    this.social = this.apiFeed;
     this.stories = new StoryLogger(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
     this.items = new TtItems(ctx, { api: () => this.webApiRef, downloader: () => this.downloaderRef });
     this.feed = routedFeed(() => (this.webApiRef ? this.apiFeed : null), this.pageFeed);

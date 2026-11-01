@@ -25,11 +25,13 @@ export const MEDIA_MAX_BYTES = 64 * 1024 * 1024;
 const CACHE_BYTES = 320 * 1024 * 1024;
 const CACHE_ENTRY_MAX = 48 * 1024 * 1024;
 const REF_TTL_MS = 6 * 3600_000;
-const SERVE_MIME = /^(video\/(mp4|webm|quicktime)|image\/(jpeg|png|webp|avif|gif))$/;
+const SERVE_MIME = /^(video\/(mp4|webm|quicktime)|image\/(jpeg|png|webp|avif|gif)|text\/vtt)$/;
 
 interface Entry {
   url: string;
   until: number;
+  /** What the bytes must be served as, whatever the CDN says (captions: `text/vtt`). */
+  as?: 'text/vtt';
 }
 
 export function refOf(url: string): string {
@@ -65,11 +67,11 @@ export class FeedMedia {
   ) {}
 
   /** The app URL for a CDN link, stable for as long as the link lives. */
-  ref(url: string): string {
+  ref(url: string, as?: 'text/vtt'): string {
     const id = refOf(url);
     const now = Date.now();
     const known = this.refs.get(id);
-    if (!known || known.url !== url || known.until <= now) this.refs.set(id, { url, until: now + REF_TTL_MS });
+    if (!known || known.url !== url || known.until <= now) this.refs.set(id, { url, until: now + REF_TTL_MS, ...(as ? { as } : {}) });
     if (this.refs.size > 4096) this.pruneRefs(now);
     return `/api/feed/media/${id}`;
   }
@@ -134,8 +136,15 @@ export class FeedMedia {
         this.onFail(out.status === 'http' ? `http ${out.code}` : out.status === 'error' ? out.reason : out.status);
         return null;
       }
-      const mime = pickMime(out.mime, url) ?? 'video/mp4';
-      const f: Fetched = { mime, data: Buffer.concat(parts, total) };
+      const data = Buffer.concat(parts, total);
+      const as = this.refs.get(id)?.as;
+      // A caption file is only served when it really is WebVTT (it goes into a <track>, never as HTML or script).
+      if (as === 'text/vtt' && !/^(\uFEFF)?WEBVTT/.test(data.subarray(0, 16).toString('utf8'))) {
+        this.onFail('not webvtt');
+        return null;
+      }
+      const mime = as ?? pickMime(out.mime, url) ?? 'video/mp4';
+      const f: Fetched = { mime, data };
       this.put(id, f);
       return f;
     } finally {

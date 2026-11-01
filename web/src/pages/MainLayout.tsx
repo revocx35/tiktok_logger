@@ -17,6 +17,7 @@ const NAV: NavEntry[] = [
   { to: '/', label: 'Messages', icon: 'inbox', iconOn: 'inboxFill', end: true, tab: 'Inbox' },
   { to: '/stories', label: 'Stories', icon: 'stories', iconOn: 'storiesFill', tab: 'Stories' },
   { to: '/deleted', label: 'Unsent', icon: 'deleted', iconOn: 'deletedFill', tab: 'Unsent' },
+  { to: '/me', label: 'Profile', icon: 'user', iconOn: 'userFill' },
   { to: '/tiktok', label: 'TikTok', icon: 'monitor', iconOn: 'monitorFill' },
 ];
 /** The phone tab bar, in TikTok's order of slots (the rest lives in the Profile sheet). */

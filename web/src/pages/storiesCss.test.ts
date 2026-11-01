@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 const SRC = fileURLToPath(new URL('../', import.meta.url));
 // Since the TikTok look (2026-10-31) also the navigation (sidebar, tab bar, More menu), the feed's action column, the
 // chat rows and the composer: classes that were renamed or added together with their rules.
-const CLASS = /^(?:(?:stories|story|page|tt-card|rail|tab|more|feed|msg|compose|chat|auth|log)-[a-z-]*|wordmark|brand-logo|log-list)$/;
+const CLASS = /^(?:(?:stories|story|page|tt-card|rail|tab|more|feed|msg|compose|chat|auth|log|profile)-[a-z-]*|wordmark|brand-logo|log-list)$/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

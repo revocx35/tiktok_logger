@@ -110,3 +110,18 @@ Never paste real message content, session cookies or `msToken` values into an is
 
 A photo story has `imagePost.images[]` (pick the widest) and no `playAddr`. Both calls are signed by the page's own
 `fetch` hook like every other `www.tiktok.com/api/…` call (see `tt/web/api.ts`).
+
+## Profiles, follows, reposts, threads (verified live 2026-10-31, v1.15)
+
+| Call | Answer / rule |
+|------|---------------|
+| `GET /api/user/detail/?uniqueId=<name>&secUid=` | `{userInfo:{user:{id,uniqueId,nickname,secUid,signature,avatarMedium,verified,privateAccount,relation,bioLink:{link}},stats:{followerCount,followingCount,heartCount,videoCount}}}`; `relation` 0 none, 1 following, 2 friends — **lags a fresh follow** |
+| `GET /api/post/item_list/` · `/api/repost/item_list/` · `/api/favorite/item_list/` (liked) · `/api/user/collect/item_list/` (favorites) `?secUid=&count=16&cursor=0&coverFormat=2` | `{itemList,cursor (string),hasMore}`; items as in the feed plus `item_control.can_repost`, `video.subtitleInfos[{Url,Format:"webvtt",LanguageCodeName,Source:"ASR"}]` (on `v16-webapp.tiktok.com`) |
+| `GET /api/comment/list/reply/?comment_id=&item_id=&count=&cursor=` | `{comments,cursor (number),has_more (0/1),total}`; a comment has `user_digged` (0/1) and `reply_comment_total` |
+| `POST /api/comment/publish/` + `reply_id`, `reply_to_reply_id` | a reply (from TikTok's own comment box code) |
+| `POST /api/comment/digg/?aweme_id=&cid=&digg_type=1\|2` | like / unlike a comment (`digg_type=0` → 5 "Invalid parameters") |
+| `POST /api/commit/follow/user/` | from a plain fetch: `10402 invalid csrf token`; TikTok's own call adds `tt-ticket-guard-*`, `tt-csrf-token`, `x-secsdk-csrf-token` (after a HEAD preflight) → **click** |
+| `POST /tiktok/v1/upvote/publish` · `/tiktok/v1/upvote/delete` `?item_id=&from_page=video` | repost / remove; publish carries the ticket guard → **click** |
+| Document load of `/@user/video/<id>` | **403 "Access to www.tiktok.com was denied"**, with or without a Referer; `/@user` and `/foryou` load. `pushState` to the video URL renders nothing |
+| Profile page | header `[data-e2e="follow-button"]` next to `user-title` ("Follow"/"Following"/"Friends"; ~20 more in "suggested"); grid `[data-e2e="user-post-item"] a[href*="/video/<id>"]` — a click opens the browse view in place |
+| Browse view | `browse-like-icon` (state: the enclosing `<button aria-pressed>`), `browse-favorite-icon`, `browse-follow`, `video-share-repost` (`aria-label` Repost / Remove repost), `comment-like-icon` |

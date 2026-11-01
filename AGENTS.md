@@ -17,21 +17,22 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 |---|---|
 | `shared/api.d.ts` | The HTTP API contract (types only), shared by server, web and the Android client |
 | `server/src/app.ts`, `http/`, `auth/`, `crypto/`, `db/`, `front/`, `supervisor/` | Fastify app, security hooks, login/2FA/sessions, envelope encryption, SQLite, gateway + one worker per user |
-| `server/src/tt/web/api.ts`, `tt/feedApi.ts` | Feed/comments/likes through the web API from the messages tab (page-driving `feed.ts` is the fallback) |
+| `server/src/tt/web/api.ts`, `tt/feedApi.ts` | Feed/comments/likes through the web API from the messages tab (page-driving `feed.ts` is the fallback); since v1.15 also `TtSocial`: profiles, lists, follow, repost, replies, comment likes, download, captions |
+| `server/src/tt/pageActions.ts`, `api/social.ts` | Clicks on TikTok's own controls for like/repost/follow (opened through the author's profile grid) · the v1.15 routes |
 | `server/src/tt/im/` | IM protocol in the tab: `wire.ts`, `proto.ts`, `engine.ts` (import, catch-up, unsend, send, profiles), `transport.ts` |
 | `server/src/tt/stories.ts`, `api/stories.ts` | Story logging (stories-bar + batch parsers, timer, media, retention) and its routes |
 | `server/src/tt/items.ts`, `api/items.ts`, `api/messageType.ts` | One TikTok post by id for the chat cards (resolved through the tab, media proxied + ranged) and the stored-type → `MessageType` / share-card mapping |
 | `server/src/tt/` | TikTok layer: `service.ts` (lifecycle, timers, tabs), `dom.ts` (messages page agent), `sender.ts`, `watcher.ts` (CDP capture), `frames.ts`/`mapper.ts`/`ingest.ts`, `feed.ts` (+`FeedCatalog`) / `feedAgent.ts` / `feedMedia.ts`, `download.ts`, `loginwatch.ts`, `cookies.ts` |
 | `server/src/api/` | Routes: chats, media, send, feed, items, stories, admin, settings, audit, SSE |
-| `web/src/` | React UI (`pages/Feed.tsx`, `pages/Stories.tsx`, `ChatView.tsx`, `Settings.tsx`, …); `components/TikTokCard.tsx` is the playable post card in a chat |
+| `web/src/` | React UI (`pages/Feed.tsx` + `components/VideoStack.tsx` (the shared player), `pages/Profile.tsx`, `pages/Stories.tsx`, `ChatView.tsx`, `Settings.tsx`, …); `components/TikTokCard.tsx` is the playable post card in a chat |
 | `chromium/` | Chromium image + Go manager (per-user browsers, token-checked CDP relay, VNC tunnel) |
 | `caddy/`, `deploy/`, `scripts/setup.sh` | TLS proxy, prebuilt-image compose, `.env` generator |
-| `scripts/dev/` | Fake TikTok (`fake-tiktok.mts`), `dom-check.mts`, `service-check.mts` (need a Chromium) |
+| `scripts/dev/` | Fake TikTok (`fake-tiktok.mts`), `dom-check.mts`, `service-check.mts` (need a Chromium); `im-probe.mts`, `social-check.mts` (live, read-only unless `--act`) |
 
 ## Commands
 
 ```bash
-cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 205 tests
+cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 253 tests
 cd web && npm ci && npm test && npm run build                                        # strict-CSP build (18 tests)
 cd server && npx tsx ../scripts/dev/service-check.mts   # real service vs fake TikTok (headless Chromium)
 ```
@@ -59,6 +60,11 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 - Put two tabs of one window in front of each other for different jobs: a `hidden` tab ignores key events (the feed has
   its own window for this reason).
 - Download TikTok media with `Network.loadNetworkResource` and expect it to work (no cookies → 403).
+- Call like/follow/repost through the web API (`/api/commit/item/digg/` 403 "Argus TLB", `/api/commit/follow/user/`
+  10402 "invalid csrf token", `/tiktok/v1/upvote/publish` ticket guard): they are clicks (`pageActions.ts`). Do not
+  rebuild the ticket-guard or `x-secsdk-csrf` headers instead.
+- `page.goto` a video's own page (`/@user/video/<id>`): TikTok answers it with 403 "Access denied" for this browser
+  (2026-10); open the video from the author's profile grid.
 - Attach to the tab while logged out (`loginwatch.ts`), weaken CSP/cookies/CSRF/the Chromium sandbox, edit old migrations.
 
 ## Gotchas
@@ -81,6 +87,13 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
   fake path; the engine fetches private photos itself) — look at it when the media path is next touched.
 - A page agent installed in a live tab survives an app restart: bump its `version` when its methods change.
 - Opening a conversation marks it read on TikTok; do not add extra opening.
+- **v1.15 live facts:** `relation` in `user/detail` lags a fresh follow (stays 0 for minutes) — `ApiFeed` remembers its
+  own follow results; the browse view draws its like column ~0.5 s after the video (wait for the control); comment
+  likes are `digg_type` 1/2 (0 is "Invalid parameters"); replies post with `reply_id` + `reply_to_reply_id`.
+  `scripts/dev/social-check.mts` re-checks all of it against the live tab. Test actions only on a public account the
+  owner agreed to (2026-10-31: @tiktok), and undo them.
+- **Not done yet (owner's alt account needed for tests):** new chat, mute/pin/delete/block a chat, group chats,
+  stickers/GIFs — these are IM protocol commands still to be captured from TikTok's own UI.
 - **Sharing a post as a card fails silently unless two things are exact**: the IM send's envelope field 6 must be the
   message type **8 (Video)** (7 = Text is accepted with status 0 and stored nowhere), and the card's `content_thumb`
   must be the **author's avatar** (a video cover there is dropped the same way). `secUID` is camelCase, each image is

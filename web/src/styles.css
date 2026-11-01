@@ -3817,3 +3817,419 @@ button.reel-action:disabled {
 .bubble.bare .media-video {
   border-radius: 8px;
 }
+
+/* ---------------------------------------------------------------- v1.15: player row, follow, repost, threads */
+/* The player row under the caption: play/pause, TikTok's thin white seek bar, the time, speed and captions. */
+.feed-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  min-width: min(360px, 70vw);
+  text-shadow: none;
+}
+.feed-player-btn {
+  background: rgba(255, 255, 255, 0.14);
+  border: 0;
+  color: #fff;
+  border-radius: 6px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.feed-player-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.feed-player-btn.on {
+  background: #fff;
+  color: #000;
+}
+.feed-speed {
+  min-width: 38px;
+}
+.feed-seek {
+  flex: 1;
+  min-width: 80px;
+  height: 4px;
+  accent-color: #fff;
+  cursor: pointer;
+}
+.feed-time {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.feed-paused {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  margin: auto;
+  width: 96px;
+  height: 96px;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+}
+.feed-video::cue {
+  font-size: 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+/* TikTok's follow badge: a red "+" circle overlapping the bottom of the author's avatar (a white check once followed). */
+.feed-avatar-box {
+  position: relative;
+  margin-bottom: 8px;
+}
+.feed-avatar-box .feed-avatar {
+  margin-bottom: 0;
+}
+.feed-follow {
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.feed-follow.on {
+  background: #fff;
+  color: var(--accent);
+}
+.feed-follow:disabled {
+  opacity: 0.6;
+}
+.feed-act:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+.feed-act.reposted .feed-act-icon {
+  color: #ffc300;
+}
+.feed-comment-line {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.feed-comment-body {
+  flex: 1;
+  min-width: 0;
+}
+.feed-comment-head a {
+  color: inherit;
+  text-decoration: none;
+}
+.feed-comment-head a:hover {
+  text-decoration: underline;
+}
+.feed-reply-btn,
+.feed-more-replies {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.feed-more-replies {
+  margin: 6px 0 0 28px;
+}
+.feed-reply-btn:hover,
+.feed-more-replies:hover {
+  color: var(--text);
+}
+.feed-comment-like {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: 0;
+  padding: 2px;
+  color: var(--muted);
+  cursor: pointer;
+  min-width: 32px;
+}
+.feed-comment-like.liked {
+  color: var(--accent);
+}
+.feed-comment.depth-0 > .feed-comment.depth-1 {
+  margin-top: 10px;
+}
+.feed-replying {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: var(--panel-2);
+  color: var(--text-2);
+}
+.err-inline {
+  color: var(--danger);
+  padding: 0 14px;
+}
+@media (max-width: 767px) {
+  .feed-rail {
+    gap: 6px;
+  }
+  .feed-act-icon {
+    width: 40px;
+    height: 40px;
+  }
+  .feed-rail a.feed-act[target='_blank'] {
+    display: none;
+  }
+  .feed-player {
+    min-width: 0;
+    width: calc(100vw - 100px);
+  }
+  .feed-meta {
+    max-width: calc(100vw - 90px);
+  }
+}
+
+/* ------------------------------------------------------------------------- v1.15: profiles (TikTok's layout) */
+.profile-page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+  max-width: 1100px;
+}
+.profile-head {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  position: relative;
+}
+.profile-back {
+  position: absolute;
+  left: -8px;
+  top: -12px;
+}
+.profile-avatar {
+  flex: none;
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--panel-2);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-who {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.profile-who h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.profile-verified {
+  color: #20d5ec;
+}
+.profile-name {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.profile-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.profile-actions .btn {
+  min-width: 140px;
+  justify-content: center;
+}
+.profile-actions .btn.icon-only {
+  min-width: 0;
+}
+.profile-following {
+  background: var(--panel-2);
+}
+.profile-stats {
+  margin: 4px 0 0;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  color: var(--text-2);
+}
+.profile-stats b {
+  color: var(--text);
+  margin-right: 4px;
+}
+.profile-bio {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--link);
+  text-decoration: none;
+}
+.profile-tabs {
+  display: flex;
+  margin-top: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.profile-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 28px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.profile-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+.profile-tile {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border: 0;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.profile-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-tile-plays {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.profile-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+}
+.profile-state.small {
+  padding: 16px 0;
+}
+.profile-sentinel {
+  height: 1px;
+}
+/* A profile's video, full screen in the For You player. */
+.profile-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #000;
+}
+.profile-viewer .feed {
+  height: 100%;
+}
+.profile-viewer-close {
+  position: absolute;
+  z-index: 8;
+  top: 22px;
+  left: 18px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+}
+@media (max-width: 767px) {
+  .profile-page {
+    padding: 16px 12px 24px;
+  }
+  .profile-head {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+  }
+  .profile-who {
+    align-items: center;
+  }
+  .profile-avatar {
+    width: 96px;
+    height: 96px;
+  }
+  .profile-back {
+    left: 0;
+    top: 0;
+  }
+  .profile-tab {
+    flex: 1;
+    justify-content: center;
+    padding: 10px 4px;
+  }
+  .profile-tab span {
+    display: none;
+  }
+  .profile-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+  }
+  .profile-tile {
+    border-radius: 0;
+  }
+}

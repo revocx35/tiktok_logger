@@ -20,6 +20,14 @@ function fakeDl(body = 'video-bytes', mime = 'video/mp4', delayMs = 0) {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe('feed media cache', () => {
+  it('serves a caption ref as text/vtt only when the bytes really are WebVTT', async () => {
+    const m = new FeedMedia();
+    const ok = m.ref('https://v16-webapp.tiktok.com/sub?x=1', 'text/vtt').split('/').pop()!;
+    expect(await m.get(ok, fakeDl('WEBVTT\n\n00:00.000 --> 00:01.000\nhi', 'application/octet-stream'))).toMatchObject({ mime: 'text/vtt' });
+    const bad = m.ref('https://v16-webapp.tiktok.com/sub?x=2', 'text/vtt').split('/').pop()!;
+    expect(await m.get(bad, fakeDl('<script>alert(1)</script>', 'text/html'))).toBeNull();
+  });
+
   it('gives one ref per URL, so the browser can keep the video', () => {
     const m = new FeedMedia();
     const a = m.ref('https://v16.example.com/a.mp4');

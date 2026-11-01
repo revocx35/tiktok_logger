@@ -1,5 +1,40 @@
 # DEVLOG — construction notes
 
+## 2026-11-01 — v1.15.0: profiles, follow, repost, comment threads, downloads, player controls (Android 0.6.0)
+
+Owner: "find which important features it doesn't have compared to the official app, give me a list, then add the ones
+I select". Picked: new chat, chat actions, stickers/GIFs, group chats, feed video download, comment threads, player
+controls, user profiles, follow, repost, own profile. The owner allowed read-only probes plus follow/repost on random
+accounts/videos, and **postponed the chat tests until they have an alt account** — so this release is the non-chat half.
+
+**Probing (live, CT 124, a temporary tab/window each time, every action undone):**
+* Read-only web API calls all work from the messages tab: profile detail, the four profile lists, replies.
+* Comment like is a plain web API call (`digg_type` 1/2). Follow (`10402 invalid csrf token`) and repost (ticket guard)
+  are not — captured TikTok's own requests with CDP while clicking its controls, then went the like's way: click.
+* **A video's own page is 403 now** for this browser (document load, with or without Referer), which also broke the
+  v1.12 like fallback (`openVideo` → `/@author/video/<id>`) for any video not on the /foryou page. A profile page loads,
+  and clicking its grid link opens TikTok's browse view without a document load — that is the new route for like,
+  repost (and follow is the profile header itself).
+* `relation` stays 0 for minutes after a follow (verified by following/unfollowing @tiktok and reading it back), while
+  accounts followed earlier read 1/2 — hence the 15 min follow memory.
+* The reply fields came from TikTok's webapp bundle (`reply_id`, `reply_to_reply_id`), read in the page, so no test
+  reply had to be posted.
+
+**Built:** `TtSocial` on `ApiFeed` (profiles, lists, follow, repost, replies, reply, comment like, download), captions as
+`text/vtt` refs (only served when the body starts with `WEBVTT`), `pageActions.ts` (profile grid → browse view → click →
+read back), `api/social.ts`. Web: `VideoStack` (the For You player, now shared) with the follow badge, repost, save, a
+player row (pause, seek, speed, captions) and threaded comments with likes and replies; `Profile.tsx` (`/me`,
+`/profile/:username`) with a full-screen viewer. Android 0.6.0: the same (`VideoActionsModel`/`VideoPane`,
+`ProfileScreen`, a Profile entry in the sheet, gallery save). `scripts/dev/social-check.mts` ran the real classes against
+the live tab: every read, then like/repost/follow/comment-like on @tiktok's newest video and each undone (all OK; the
+first run found the browse view draws its like column ~0.5 s late — the click now waits for the control).
+
+The test harness's `makeHarness` option was still called `ig` (insta_logger's) while `createApp` reads `tt`, so an
+injected TikTok controller was silently ignored; renamed.
+
+**Open:** new chat, mute/pin/delete/block, group chats, stickers/GIFs — IM commands to be captured from TikTok's UI
+with the owner's alt account. "Watch history" is not something TikTok's web app has.
+
 ## 2026-10-31 — v1.14.0: the TikTok look (web UI + Android 0.5.0)
 
 The owner asked for the same as insta_logger got on 2026-10-27: make the web UI and the phone app look like the

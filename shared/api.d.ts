@@ -369,6 +369,8 @@ export interface FeedAuthor {
   username: string | null;
   name: string | null;
   avatar: string | null;
+  /** Whether the owner follows the author (null when TikTok did not say). Since v1.15. */
+  following?: boolean | null;
 }
 
 export interface FeedStats {
@@ -384,6 +386,16 @@ export interface FeedVideo {
   poster: string | null;
   muted: boolean;
   playing: boolean;
+  /** WebVTT caption tracks (app URLs), TikTok's own auto-captions. Since v1.15. */
+  captions?: FeedCaption[];
+  /** App URL that downloads the video as a file (`Content-Disposition: attachment`). Since v1.15. */
+  download?: string | null;
+}
+
+export interface FeedCaption {
+  /** BCP-47-ish language code TikTok gives (e.g. `eng-US`, `tur-TR`). */
+  lang: string;
+  src: string;
 }
 
 export interface FeedItem {
@@ -398,6 +410,10 @@ export interface FeedItem {
   /** The owner's like on this video, as TikTok shows it. */
   liked: boolean;
   video: FeedVideo | null;
+  /** The owner's repost of this video (null when not known yet: TikTok's lists do not say). Since v1.15. */
+  reposted?: boolean | null;
+  /** False when the author turned reposts off. Since v1.15. */
+  canRepost?: boolean;
 }
 
 export interface FeedComment {
@@ -406,12 +422,58 @@ export interface FeedComment {
   text: string;
   likes: number | null;
   replies: FeedComment[];
+  /** The owner's like on this comment. Since v1.15. */
+  liked?: boolean;
+  /** How many replies the comment has in total (`replies` holds at most the first few). Since v1.15. */
+  replyCount?: number | null;
 }
 
 export interface FeedStepRequest { dir: 'next' | 'prev' }
 export interface FeedLikeRequest { like: boolean }
 export interface FeedCommentRequest { text: string }
 export interface FeedCommentPage { comments: FeedComment[] }
+/** `GET /api/feed/:id/comments/:cid/replies?cursor=` and `POST /api/feed/:id/comments/:cid/reply`. */
+export interface FeedReplyPage { comments: FeedComment[]; cursor: string | null; more: boolean }
+/** `POST /api/feed/:id/comments/:cid/reply`; [toReply] = the reply being answered inside the thread. */
+export interface FeedReplyRequest { text: string; toReply?: string }
+/** `POST /api/feed/:id/comments/:cid/like` → `{ liked }`. */
+export interface FeedCommentLikeRequest { like: boolean }
+/** `POST /api/feed/:id/repost` → `{ reposted }`. */
+export interface FeedRepostRequest { repost: boolean }
+
+/* ---------------------------------------------------------------- profiles */
+// TikTok accounts, read through the web API (nothing is stored). `avatar` is an app URL like the feed's media.
+// Any video in a profile's lists can be played, liked, reposted, commented, shared and downloaded with the
+// /api/feed/:id/* routes once the list was loaded.
+
+export type ProfileTab = 'videos' | 'reposts' | 'liked' | 'favorites';
+
+export interface TtProfile {
+  id: string;
+  username: string;
+  name: string | null;
+  avatar: string | null;
+  bio: string | null;
+  link: string | null;
+  verified: boolean;
+  private: boolean;
+  /** The owner's own account. */
+  me: boolean;
+  /** The owner follows this account (null for the owner's own profile). */
+  following: boolean | null;
+  /** Both follow each other (TikTok's "Friends"). */
+  friends: boolean;
+  stats: { followers: number | null; following: number | null; likes: number | null; videos: number | null };
+  /** The lists that can be opened: the owner sees all four, others only what TikTok shows publicly. */
+  tabs: ProfileTab[];
+  /** https://www.tiktok.com/@username */
+  url: string;
+}
+
+/** `GET /api/profiles/:username/videos?tab=&cursor=`. */
+export interface ProfileVideoPage { items: FeedItem[]; cursor: string | null; more: boolean }
+/** `POST /api/profiles/:username/follow` → `{ following }`. */
+export interface FollowRequest { follow: boolean }
 
 /* --------------------------------------------------------- user management */
 // Served by the gateway under /api/admin/* (admin only). Nothing here exposes a user's data: the admin sees names,

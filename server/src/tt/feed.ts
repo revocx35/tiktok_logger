@@ -4,6 +4,7 @@ import type { AppContext } from '../context.js';
 import { AppError, Errors } from '../errors.js';
 import { BrowserDownloader } from './download.js';
 import { FeedMedia, refOf, type Fetched } from './feedMedia.js';
+import { PageActions } from './pageActions.js';
 import { FeedAgent, mergeFeedSelectors, type RawFeedItem, type RawQueueItem } from './feedAgent.js';
 
 /**
@@ -51,10 +52,33 @@ export interface CatalogItem {
   /** The post's pixel size (a share card carries it). */
   videoWidth: number | null;
   videoHeight: number | null;
+  /** `author.relation`: 0 = not followed, 1 = following, 2 = friends (each follows the other); null = not given. */
+  authorRelation?: number | null;
+  /** `item_control.can_repost` (false = the author turned reposts off); null = not given. */
+  canRepost?: boolean | null;
+  /** The owner's repost, once known (an item in the owner's repost list, or after a repost through the app). */
+  reposted?: boolean | null;
+  /** WebVTT caption tracks from `video.subtitleInfos` (signed CDN links, like the video). */
+  subtitles?: { url: string; lang: string }[];
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const norm = (s: string | null | undefined): string => (s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/** The WebVTT tracks of `video.subtitleInfos` (`{Url, Format: "webvtt", LanguageCodeName}`), at most 6, TikTok hosts only. */
+export function subtitlesOf(raw: unknown): { url: string; lang: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { url: string; lang: string }[] = [];
+  for (const s of raw as { Url?: unknown; Format?: unknown; LanguageCodeName?: unknown; LanguageID?: unknown }[]) {
+    if (!s || typeof s.Url !== 'string' || !/^https:\/\//.test(s.Url)) continue;
+    if (typeof s.Format === 'string' && s.Format.toLowerCase() !== 'webvtt') continue;
+    const lang = typeof s.LanguageCodeName === 'string' && /^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$/.test(s.LanguageCodeName) ? s.LanguageCodeName : 'und';
+    if (out.some((o) => o.lang === lang)) continue;
+    out.push({ url: s.Url, lang });
+    if (out.length >= 6) break;
+  }
+  return out;
+}
 
 export class FeedCatalog {
   private readonly byId = new Map<string, CatalogItem>();
@@ -99,6 +123,12 @@ export class FeedCatalog {
     return out;
   }
 
+  /** Remembers a repost made through the app. */
+  markReposted(id: string, reposted: boolean): void {
+    const it = this.byId.get(id);
+    if (it) it.reposted = reposted;
+  }
+
   /** Position in feed order, or -1. */
   indexOf(id: string | null): number {
     return id ? this.order.indexOf(id) : -1;
@@ -118,9 +148,10 @@ export class FeedCatalog {
       const it = raw as {
         id?: unknown;
         desc?: unknown;
-        author?: { uniqueId?: unknown; nickname?: unknown; avatarThumb?: unknown; avatarMedium?: unknown; id?: unknown; secUid?: unknown };
+        author?: { uniqueId?: unknown; nickname?: unknown; avatarThumb?: unknown; avatarMedium?: unknown; id?: unknown; secUid?: unknown; relation?: unknown };
         digged?: unknown;
-        video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown; width?: unknown; height?: unknown };
+        video?: { playAddr?: unknown; play_addr?: unknown; downloadAddr?: unknown; cover?: unknown; originCover?: unknown; width?: unknown; height?: unknown; subtitleInfos?: unknown };
+        item_control?: { can_repost?: unknown };
         music?: { title?: unknown };
         stats?: { diggCount?: unknown; commentCount?: unknown; shareCount?: unknown; playCount?: unknown };
       };
@@ -146,6 +177,10 @@ export class FeedCatalog {
         videoHeight: num(v.height) ?? null,
         avatar: str(it.author?.avatarThumb) ?? str(it.author?.avatarMedium),
         liked: typeof it.digged === 'boolean' ? it.digged : null,
+        authorRelation: num(it.author?.relation),
+        canRepost: typeof it.item_control?.can_repost === 'boolean' ? it.item_control.can_repost : null,
+        reposted: this.byId.get(id)?.reposted ?? null,
+        subtitles: subtitlesOf(v.subtitleInfos),
       };
       if (!this.byId.has(id)) this.order.push(id);
       this.byId.set(id, entry);
@@ -545,30 +580,47 @@ export class FeedService {
   /**
    * A like for an item that may not be anywhere in the page's own list.
    *
-   * Our feed order comes from the web API; the page's For You order is its own, so an item further ahead is not
-   * reachable by scrolling. When the page does not have it, the video's own page is opened first — there its like
-   * control is by definition on screen — and the normal like runs on top of that.
+   * Our feed order comes from the web API; the page's For You order is its own. When the For You page has the item on
+   * screen its own control is used; otherwise the video is opened from its author's profile grid and liked there (its
+   * own page is 403 for this browser since 2026-10, see `pageActions.ts`).
    */
-  async likeOnVideo(id: string, want: boolean): Promise<{ liked: boolean }> {
+  async likeOnVideo(id: string, author: string | null, want: boolean): Promise<{ liked: boolean }> {
     // One step of the chain: the navigation and the click must not interleave with another feed call.
     return this.run(async () => {
-      const agent = await this.ensureAgent();
-      const rendered = await agent.ensureItem(id).catch(() => ({ ok: false as const }));
-      if (!rendered.ok) await this.openVideo(id);
-      return this.likeNow(id, want);
+      const got = await this.provider.feedPage();
+      if (!got) throw Errors.unavailable('TikTok is not connected. Log in on the TikTok screen first.');
+      if (this.agent && this.page === got.page && /\/foryou/.test(got.page.url())) {
+        const rendered = await this.agent.ensureItem(id).catch(() => ({ ok: false as const }));
+        if (rendered.ok) return this.likeNow(id, want);
+      }
+      if (!author) throw new AppError(409, 'feed_moved', 'TikTok did not say who posted that video.');
+      const liked = await this.pageActions().onVideo(author, id, 'like', want);
+      this.catalog?.markLiked(id, liked);
+      return { liked };
     });
   }
 
-  /** Opens `/<author>/video/<id>` in the feed tab (a new document, so the in-page helpers are installed again). */
-  private async openVideo(id: string): Promise<void> {
-    const c = this.catalog?.byIdLookup(id);
-    const agent = await this.ensureAgent();
-    if (!c?.author || !this.page) throw new AppError(409, 'feed_moved', 'That video is not in the feed any more. Swipe to it again.');
-    const url = videoPageUrl(this.origin, c.author, id);
-    if (this.page.url() === url) return; // already there: the like is for the video on screen
-    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
-    await agent.install().catch(() => undefined);
-    await this.waitForItem(15_000);
+  /** Reposts or removes the repost through TikTok's own control (the publish call needs its ticket guard). */
+  async repostOnVideo(id: string, author: string, want: boolean): Promise<{ reposted: boolean }> {
+    return this.run(async () => ({ reposted: await this.pageActions().onVideo(author, id, 'repost', want) }));
+  }
+
+  /** Follows/unfollows through the profile's own button (the follow call is refused without TikTok's CSRF/guard). */
+  async followOnProfile(username: string, want: boolean): Promise<{ following: boolean }> {
+    return this.run(async () => ({ following: await this.pageActions().follow(username, want) }));
+  }
+
+  private actions: PageActions | null = null;
+
+  private pageActions(): PageActions {
+    this.actions ??= new PageActions(async () => {
+      const got = await this.provider.feedPage();
+      if (!got) throw Errors.unavailable('TikTok is not connected. Log in on the TikTok screen first.');
+      // The tab is about to leave /foryou: the in-page feed helper does not survive that.
+      this.agent = null;
+      return got;
+    });
+    return this.actions;
   }
 
   /** Likes (or un-likes) the video in view. Refuses when the feed moved on to another video. */
