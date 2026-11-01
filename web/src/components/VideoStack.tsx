@@ -6,8 +6,10 @@ import { formatCount } from '../lib/format';
 import { Icon } from './Icon';
 import { Avatar, ErrorNote, Modal, Spinner } from './ui';
 
-/** Slides this close to the active one get their video source attached, so a swipe starts playing at once. */
-const NEAR = 1;
+/** Slides this close to the active one get their video source attached (and buffer), so a swipe starts playing at once:
+ *  one behind, two ahead — the way people swipe. */
+const BEHIND = 1;
+const AHEAD = 2;
 /** TikTok's own speed steps. */
 const SPEEDS = [1, 1.5, 2, 0.5, 0.75];
 
@@ -170,7 +172,7 @@ export function VideoStack({
             key={item.id}
             item={item}
             active={item.id === activeId}
-            near={Math.abs(i - activeIndex) <= NEAR}
+            near={i - activeIndex >= -BEHIND && i - activeIndex <= AHEAD}
             muted={muted}
             speed={speed}
             captions={captions}

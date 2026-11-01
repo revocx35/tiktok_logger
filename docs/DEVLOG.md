@@ -1,5 +1,16 @@
 # DEVLOG — construction notes
 
+## 2026-11-01 — v1.15.1: TikTok-like swiping (Android 0.7.0)
+
+Owner: "scrolling in the feed is very bad … it just instantly gets the new video. I want it to be like the official
+TikTok app." The cause was the **Android** feed: one video on screen, a drag threshold, then `POST /api/feed/step` and the
+next video swapped in at once — no page under the finger, no fling, and a load after every swipe. Android 0.7.0 swipes
+the server's window (`/api/feed/window` + `/api/feed/goto`, which the web already used) in a `VerticalPager` with three
+pooled ExoPlayers (settled video + both neighbours prepared and buffered, TextureView so the frame moves with the page,
+poster until the first frame), caption and action column per page, double tap likes. Profiles' videos use the same pager.
+Web: the list was capped at 40 (the feed ended there), the full-screen spinner flashed on every swipe, and only the next
+slide buffered — now uncapped at the end, spinner only on the last video, one behind and two ahead buffer. No server change.
+
 ## 2026-11-01 — v1.15.0: profiles, follow, repost, comment threads, downloads, player controls (Android 0.6.0)
 
 Owner: "find which important features it doesn't have compared to the official app, give me a list, then add the ones

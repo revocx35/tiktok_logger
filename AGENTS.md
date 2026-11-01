@@ -75,6 +75,9 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
   `pages/storiesCss.test.ts` fails otherwise. `.grow` has a global `min-width: 200px` (settings forms) — never use it as
   a flex spacer in a list row (it squeezed the inbox previews to nothing). The Unsent/Search lists are `.log-*`; `.feed`
   is the For You page only (the two once shared `.feed`, which capped For You at 900 px).
+- The For You list in `pages/Feed.tsx` only ever grows at the end: never cut it from the front (the scroller would jump)
+  and never cap it short (a 40-item cap once ended the feed). The Android client swipes the same `/api/feed/window` +
+  `/api/feed/goto` pair; `/api/feed/step` is only kept for old clients.
 - Preview the web UI without a stack: serve `web/dist` from a small Node server that answers `/api/*` with fixture JSON
   (state, chats, messages, feed window, stories) and screenshot it with puppeteer at 1280×820 and 390×844, light and dark.
 

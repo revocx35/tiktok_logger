@@ -6,7 +6,7 @@ import { ErrorNote, Spinner } from '../components/ui';
 import { VideoStack } from '../components/VideoStack';
 
 /** How many videos ahead of the one on screen are fetched (and preloaded) at a time. */
-const WINDOW = 3;
+const WINDOW = 4;
 
 /**
  * TikTok's For You feed inside tiktok_logger.
@@ -39,7 +39,9 @@ export function FeedPage() {
         if (at >= 0) merged[at] = { ...merged[at]!, ...it };
         else merged.push(it);
       }
-      return merged.slice(0, 40);
+      // Only new videos are appended, so nothing above the one in view moves, and nothing is cut off: a slide away
+      // from the one in view has no video source (a poster and a few nodes). A cap of 40 used to end the feed there.
+      return merged;
     });
     setActiveId((cur) => cur ?? r.current ?? r.items[0]?.id ?? null);
   }, []);
@@ -118,7 +120,8 @@ export function FeedPage() {
           onActive={onActive}
         />
       )}
-      {busy ? (
+      {/* Only at the end of the list: elsewhere the next videos are already there, so a spinner over them is noise. */}
+      {busy && activeId !== null && items.findIndex((i) => i.id === activeId) >= items.length - 1 ? (
         <div className="feed-busy">
           <Spinner size={22} />
         </div>

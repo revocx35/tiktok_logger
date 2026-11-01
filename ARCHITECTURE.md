@@ -450,7 +450,10 @@ Routes: `/signup`, `/login`, `/recover`, `/setup/recovery`, `/setup/link`, `/` (
 The video player (`components/VideoStack.tsx`, v1.15) is shared by For You and a profile's videos: a snapping scroller
 with TikTok's action column (author → profile with a follow badge, like, comments, repost, send, save, sound, open) and a
 player row (play/pause, seek bar, speed 1/1.5/2/0.5/0.75×, TikTok's WebVTT captions via `<track>`; a click on the video
-pauses). The comments panel has threads ("View N replies", reply to a comment or to a reply) and comment likes. The
+pauses). Swiping (v1.15.1): one slide behind and two ahead carry their video source and buffer, the list only grows at
+the end (a 40-item cap used to end the feed there), and the busy spinner shows only when the user is on the last video
+while the server fetches more — elsewhere the next videos are already in place. The Android client swipes the same
+window in a `VerticalPager` with a three-player pool (its ARCHITECTURE). The comments panel has threads ("View N replies", reply to a comment or to a reply) and comment likes. The
 profile page (`pages/Profile.tsx`) is TikTok's: avatar, handle, Follow/Following/Friends, Following · Followers · Likes,
 bio and link, the list tabs and a grid that loads the next page at its end; a tile opens the list full screen in the
 player.
