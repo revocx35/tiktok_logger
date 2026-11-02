@@ -80,6 +80,22 @@ describe('TtScheduler', () => {
     expect(s.view()).toMatchObject({ mode: 'on', phase: 'on', phaseUntil: null });
   });
 
+  it('starts TikTok once, not on every tick (start() reconnects and reloads the tab)', async () => {
+    const s = make();
+    await s.start();
+    for (let i = 0; i < 5; i++) {
+      now += 15_000;
+      await s.tick();
+    }
+    // saving a schedule while it runs, and ticking inside the on phase, must not reconnect either
+    await s.set(base);
+    now += 5 * MIN;
+    await s.tick();
+    await s.tick();
+    s.stop();
+    expect(tt.calls).toEqual(['start']);
+  });
+
   it('always off pauses, and on resumes', async () => {
     const s = make();
     await s.set({ ...base, mode: 'off' });

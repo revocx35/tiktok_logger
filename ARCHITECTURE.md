@@ -694,7 +694,7 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
 
 ## 10. Testing
 
-* `server` (vitest, 269 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
+* `server` (vitest, 270 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
   hardening; `tt/frames.test.ts` (protobuf walk, JSON recovery, bounds, IM URL/socket detection);
   `tt/mapper.test.ts` (TikTok answer shapes, content JSON, stickers/media, junk rejection, DOM rows, stable ids);
   `tt/ingest.test.ts` (encrypted storage with no plaintext in the file, DOM/network merge, album parts, idempotency,

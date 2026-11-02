@@ -1,5 +1,11 @@
 # DEVLOG — construction notes
 
+## 2026-11-02 — v1.16.1: hotfix, sessions restarted every 15 s
+
+v1.16.0's scheduler called `tt.start()` on every tick for an "on" session, assuming it was idempotent. It is not: each call
+runs `connect()` again and navigates the tab, so every session reloaded and re-imported every ~15 s ("Execution context was
+destroyed" in the log). Now `start()` is called once per process; `resume()` connects by itself. Regression test added.
+
 ## 2026-11-02 — v1.16.0: TikTok session schedule (Android 0.8.0)
 
 Owner: the Israeli account (made through a proxy to get past Turkey's age check) should not look online 24/7. Admin →
@@ -8,7 +14,7 @@ repeat) with an optional randomizer (± minutes on each length). Worker-side `Tt
 phase in the tenant DB; "off" pauses `TtService` and stops the tenant's Chromium through a new manager endpoint
 `POST /i/<id>/stop` (profile kept), "on" reconnects. Web `Admin.tsx` SessionModal, Android `AdminScreen` SessionDialog,
 `PUT /api/admin/users/:id/tt-schedule`, `AdminUser.ttSchedule`. Tests: `tt/schedule.test.ts` (14), gateway admin route
-test, Go `TestStopNeedsTheInstanceToken` — server 269, web 18. Design notes in ARCHITECTURE §4 "Session schedule".
+test, Go `TestStopNeedsTheInstanceToken` — server 270, web 18. Design notes in ARCHITECTURE §4 "Session schedule".
 
 ## 2026-11-01 — v1.15.1: TikTok-like swiping (Android 0.7.0)
 

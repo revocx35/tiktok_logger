@@ -71,6 +71,8 @@ export function secureRandom(): number {
 export class TtScheduler {
   private timer: NodeJS.Timeout | null = null;
   private busy: Promise<void> = Promise.resolve();
+  /** tt.start() has been called in this process. It is NOT idempotent (every call reconnects and reloads the tab). */
+  private started = false;
 
   constructor(
     private readonly repo: Repo,
@@ -150,12 +152,14 @@ export class TtScheduler {
     else want = c.mode;
     if (want === 'off' && !this.tt.isPaused()) {
       this.log.info('session schedule: switching the TikTok session off');
+      this.started = true; // a later resume() connects by itself
       await this.tt.pause();
     } else if (want === 'on' && this.tt.isPaused()) {
       this.log.info('session schedule: switching the TikTok session on');
       await this.tt.resume();
-    } else if (want === 'on') {
-      await this.tt.start(); // idempotent; also the first start after boot
+    } else if (want === 'on' && !this.started) {
+      this.started = true;
+      await this.tt.start(); // the first start after boot, once: later ticks must leave a running session alone
     }
   }
 

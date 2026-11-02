@@ -33,7 +33,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 ## Commands
 
 ```bash
-cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 269 tests
+cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 270 tests
 cd web && npm ci && npm test && npm run build                                        # strict-CSP build (18 tests)
 cd server && npx tsx ../scripts/dev/service-check.mts   # real service vs fake TikTok (headless Chromium)
 ```
@@ -70,7 +70,7 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 
 ## Gotchas
 
-- **Session schedule (v1.16):** `TtService.paused` makes `start()/connect()` no-ops and `restart()/importSession()` 409. Anything new that wakes
+- **Session schedule (v1.16):** `TtScheduler` calls `tt.start()` once per process (it is NOT idempotent: every call reconnects and reloads the tab; a per-tick call looped the sessions on 2026-11-02). `TtService.paused` makes `start()/connect()` no-ops and `restart()/importSession()` 409. Anything new that wakes
   the TikTok session (connects, `chromium.ensure()`) must respect it, or "off" leaks. Don't add a `TtState` value for it (old Android
   clients crash on unknown enums) — it is `idle` + a detail. The phase is persisted in the tenant DB; tests inject `clock`/`rand`.
 
