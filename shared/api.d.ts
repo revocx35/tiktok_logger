@@ -499,6 +499,31 @@ export interface AdminUser {
   status: UserStatus;
   /** State of the user's TikTok link; null when the user's worker could not be asked. */
   tt: TtState | null;
+  /** The admin's TikTok session schedule for this user; null when the worker could not be asked. */
+  ttSchedule: TtScheduleView | null;
+}
+
+/**
+ * When the user's TikTok session (the browser tab and the logging) is running.
+ * 'on' = always, 'off' = never (browser stopped), 'scheduled' = alternates: off for offMinutes, then on for onMinutes.
+ * With randomize each phase lasts its length ± a random amount up to the jitter (uniform, at least 1 minute).
+ */
+export type TtScheduleMode = 'on' | 'off' | 'scheduled';
+export interface TtScheduleConfig {
+  mode: TtScheduleMode;
+  /** Scheduled mode: how long the session stays off / on, in minutes (1–10080). */
+  offMinutes: number;
+  onMinutes: number;
+  randomize: boolean;
+  /** ± minutes added to the off / on length when randomize is on (0–offMinutes-1 / 0–onMinutes-1). */
+  offJitterMinutes: number;
+  onJitterMinutes: number;
+}
+export interface TtScheduleView extends TtScheduleConfig {
+  /** Whether the session is running or switched off right now. */
+  phase: 'on' | 'off';
+  /** When the current phase ends (ms since epoch); null unless mode is 'scheduled'. */
+  phaseUntil: number | null;
 }
 
 export interface AdminPort {
@@ -531,6 +556,7 @@ export interface CreateUserRequest {
 export interface CreateUserResponse { user: AdminUser; temporaryPassword: string }
 
 export interface UpdateUserRequest { port?: number | null; disabled?: boolean }
+export type SetTtScheduleRequest = TtScheduleConfig;
 
 /** 'recovery': keep the data, the user needs their recovery key. 'wipe': delete everything of the account and start over. */
 export type ResetMode = 'recovery' | 'wipe';

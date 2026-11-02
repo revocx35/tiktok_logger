@@ -164,6 +164,31 @@ Routes for all of this live in `server/src/api/` (`feed.ts`, `stories.ts`, `chat
 
 `idle → starting → login/challenge → starting → syncing → ready`, with `error` for a lost browser (retry with backoff).
 
+### Session schedule (`tt/schedule.ts`, v1.16)
+
+The admin decides per user when the TikTok session runs (Admin → Users → **Session…**): `on` (always, the default),
+`off` (never) or `scheduled` (off for *X*, then on for *Y*, repeating; starts with the on phase). With *randomize* every
+phase is its base length ± a uniform random amount up to the configured jitter (drawn from `crypto.randomInt`, never
+under a minute; the jitter must be shorter than the phase). Motivation: a TikTok account that lives behind a foreign
+proxy (e.g. an Israeli residential exit) should not be online around the clock — fewer resources, a less bot-like
+pattern.
+
+* **Where it lives.** `TtScheduler` runs in each tenant **worker** (`ctx.schedule`), config + current phase persisted in
+  the tenant DB (`app_state` keys `tt_schedule`, `tt_schedule_phase`), so restarts and deploys resume the cycle (a
+  long downtime flips at most one phase, timed from now). It ticks every 15 s and once at boot (`index.ts` calls
+  `ctx.schedule.start()` instead of `tt.start()`); it does nothing until an owner exists.
+* **"Off" really is off.** `TtService.pause()` tears everything down (loops, watcher, feed tab, IM engine), sets state
+  `idle` with the detail "Switched off by the session schedule." and asks the chromium manager to **stop this tenant's
+  browser** (`POST /i/<id>/stop`, instance token; profile and TikTok login stay on disk). `resume()` runs the normal
+  `connect()`, whose `chromium.ensure()` starts the browser again. While paused `start()/connect()` are no-ops and
+  `restart()`/`importSession()` answer 409, so nothing in the UI can wake the session by accident. No new `TtState`
+  value was added on purpose (old Android clients would not know it).
+* **Catch-up.** Messages that arrived while it was off are fetched by the IM catch-up cursor when it comes back; a
+  message the sender unsends during the off window can be missed.
+* **API.** Gateway `PUT /api/admin/users/:id/tt-schedule` (admin, CSRF, Origin; any account incl. the admin's own) →
+  worker `PUT /internal/tt-schedule` (zod `ScheduleSchema`, strict). The current schedule rides on `AdminUser.ttSchedule`
+  (from `/internal/info`). Audited as `tt_schedule_set`.
+
 ### Two paths: the IM protocol (normal) and the page (fallback)
 
 Once the tab is attached, `startEngine()` probes TikTok's IM protocol (`tt/im/`, protobuf on `im-api-sg.tiktok.com`,
@@ -647,6 +672,7 @@ Migrations are append-only (`server/src/db/db.ts`). `app_state` keys: `settings`
 | GET | /api/admin/overview · /api/admin/audit | ✓ admin | users, ports, admin log (gateway) |
 | POST | /api/admin/users · /api/admin/users/:id/reset · /delete | ✓ admin | create with temporary password · reset · delete |
 | PATCH | /api/admin/users/:id | ✓ admin | move to another port, disable/enable |
+| PUT | /api/admin/users/:id/tt-schedule | ✓ admin | TikTok session schedule: on / off / scheduled (+ randomizer) |
 | PUT/DELETE | /api/admin/ports/:port | ✓ admin | open/close an extra port, set its browser origin |
 | POST | /api/auth/claim · /api/auth/verify · /api/auth/ping · GET /api/auth/whoami | | claim a temporary password · re-check the password |
 | GET/POST | /internal/* (provision, info, signup, reset, revoke-sessions, unlink) | gateway only | token + scope header |
@@ -668,7 +694,7 @@ selectors as JSON, extending `server/src/tt/dom.ts` and `server/src/tt/feedAgent
 
 ## 10. Testing
 
-* `server` (vitest, 253 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
+* `server` (vitest, 269 tests): crypto, auth flows, multi-user (claim, reset, isolation, ports, supervisor), gateway
   hardening; `tt/frames.test.ts` (protobuf walk, JSON recovery, bounds, IM URL/socket detection);
   `tt/mapper.test.ts` (TikTok answer shapes, content JSON, stickers/media, junk rejection, DOM rows, stable ids);
   `tt/ingest.test.ts` (encrypted storage with no plaintext in the file, DOM/network merge, album parts, idempotency,

@@ -64,12 +64,14 @@ export function registerAdminRoutes(app: FastifyInstance, gw: Gateway): void {
   async function view(u: UserRow): Promise<AdminUser> {
     let status: UserStatus = 'unknown';
     let tt: AdminUser['tt'] = null;
+    let ttSchedule: AdminUser['ttSchedule'] = null;
     try {
       const r = await gw.callInternal(u, 'GET', '/internal/info', undefined, 4000);
       if (r.status === 200) {
-        const info = JSON.parse(r.body.toString('utf8')) as { hasOwner: boolean; pending: 'new' | 'reset' | null; tt: AdminUser['tt'] };
+        const info = JSON.parse(r.body.toString('utf8')) as { hasOwner: boolean; pending: 'new' | 'reset' | null; tt: AdminUser['tt']; ttSchedule?: AdminUser['ttSchedule'] };
         status = info.pending === 'reset' ? 'reset' : info.pending === 'new' || !info.hasOwner ? 'pending' : 'active';
         tt = info.hasOwner ? info.tt : null;
+        ttSchedule = info.hasOwner ? (info.ttSchedule ?? null) : null;
       }
     } catch {
       /* unreachable worker: shown as unknown */
@@ -84,6 +86,7 @@ export function registerAdminRoutes(app: FastifyInstance, gw: Gateway): void {
       lastLoginAt: u.last_login_at,
       status,
       tt,
+      ttSchedule,
     };
   }
 
@@ -175,6 +178,17 @@ export function registerAdminRoutes(app: FastifyInstance, gw: Gateway): void {
     // Sessions end now: an open stream (VNC, calls, live updates) is closed by the worker when its session goes.
     if (revoke) await gw.callInternal(u, 'POST', '/internal/revoke-sessions', {}).catch(() => undefined);
     return view(gw.repo.getUser(u.id)!);
+  });
+
+  /* ------------------------------------------------- TikTok session schedule */
+  // Allowed for every account (the admin's own included); the worker validates the body and keeps the state.
+  app.put('/api/admin/users/:id/tt-schedule', cfg, async (req) => {
+    const admin = await requireAdmin(req);
+    const u = target(req.params);
+    const r = await gw.callInternal(u, 'PUT', '/internal/tt-schedule', req.body, 90_000);
+    if (r.status !== 200) throw workerError(r.status, r.body) ?? Errors.unavailable('The schedule could not be saved.');
+    audit('tt_schedule_set', req, admin, u);
+    return JSON.parse(r.body.toString('utf8'));
   });
 
   /* -------------------------------------------------------------- reset */

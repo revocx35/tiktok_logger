@@ -28,8 +28,9 @@ async function main(): Promise<void> {
   } else {
     await app.listen({ host: config.host, port: config.port });
   }
-  if (ctx.repo.hasOwner()) await ctx.tt.start();
-  else log.info('No owner yet — waiting for the account to be created or claimed.');
+  if (!ctx.repo.hasOwner()) log.info('No owner yet — waiting for the account to be created or claimed.');
+  // Starts TikTok unless the admin's session schedule says it is off right now, and keeps the cycle going.
+  await ctx.schedule.start();
 
   let stopping = false;
   const shutdown = async (signal: string) => {

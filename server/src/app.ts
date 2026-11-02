@@ -52,6 +52,7 @@ export async function createApp(
   registerVncRoutes(app, ctx);
   opts.routes?.(app, ctx);
   app.addHook('onClose', async () => {
+    ctx.schedule.stop();
     await ctx.tt.stop();
     ctx.writer()?.dispose();
     db.close();

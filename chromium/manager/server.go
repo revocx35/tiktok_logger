@@ -23,6 +23,7 @@ func NewHandler(b Backend, secret []byte) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /i/{id}/ensure", s.guard(authInstance, s.ensure))
 	mux.HandleFunc("POST /i/{id}/restart", s.guard(authInstance, s.restart))
+	mux.HandleFunc("POST /i/{id}/stop", s.guard(authInstance, s.stop))
 	mux.HandleFunc("DELETE /i/{id}", s.guard(authAdmin, s.remove))
 	mux.HandleFunc("GET /i/{id}/vnc-password", s.guard(authInstance, s.vncPassword))
 	mux.HandleFunc("GET /i/{id}/vnc", s.guard(authInstance, s.vncTunnel))
@@ -84,6 +85,16 @@ func (s *server) restart(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ready": true})
+}
+
+func (s *server) stop(w http.ResponseWriter, r *http.Request, id int) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	if err := s.b.Stop(ctx, id); err != nil {
+		fail(w, 500, "could not stop the browser")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *server) remove(w http.ResponseWriter, r *http.Request, id int) {

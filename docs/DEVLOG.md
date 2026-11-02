@@ -1,5 +1,15 @@
 # DEVLOG — construction notes
 
+## 2026-11-02 — v1.16.0: TikTok session schedule (Android 0.8.0)
+
+Owner: the Israeli account (made through a proxy to get past Turkey's age check) should not look online 24/7. Admin →
+Users → **Session…** now sets per user: always on / always off / scheduled (off for e.g. 4 h, then on for 20 min,
+repeat) with an optional randomizer (± minutes on each length). Worker-side `TtScheduler` (`tt/schedule.ts`) persists the
+phase in the tenant DB; "off" pauses `TtService` and stops the tenant's Chromium through a new manager endpoint
+`POST /i/<id>/stop` (profile kept), "on" reconnects. Web `Admin.tsx` SessionModal, Android `AdminScreen` SessionDialog,
+`PUT /api/admin/users/:id/tt-schedule`, `AdminUser.ttSchedule`. Tests: `tt/schedule.test.ts` (14), gateway admin route
+test, Go `TestStopNeedsTheInstanceToken` — server 269, web 18. Design notes in ARCHITECTURE §4 "Session schedule".
+
 ## 2026-11-01 — v1.15.1: TikTok-like swiping (Android 0.7.0)
 
 Owner: "scrolling in the feed is very bad … it just instantly gets the new video. I want it to be like the official

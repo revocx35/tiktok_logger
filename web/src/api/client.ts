@@ -10,6 +10,8 @@ import type {
   ResetUserRequest,
   ResetUserResponse,
   UpdateUserRequest,
+  SetTtScheduleRequest,
+  TtScheduleView,
   ChatSummary,
   DeletedFeedPage,
   LoginResponse,
@@ -221,6 +223,7 @@ export const api = {
   adminOverview: () => request<AdminOverview>('GET', '/api/admin/overview'),
   adminCreateUser: (body: CreateUserRequest) => request<CreateUserResponse>('POST', '/api/admin/users', body),
   adminUpdateUser: (id: number, body: UpdateUserRequest) => request<AdminUser>('PATCH', `/api/admin/users/${id}`, body),
+  adminSetTtSchedule: (id: number, body: SetTtScheduleRequest) => request<TtScheduleView>('PUT', `/api/admin/users/${id}/tt-schedule`, body),
   adminResetUser: (id: number, body: ResetUserRequest) => request<ResetUserResponse>('POST', `/api/admin/users/${id}/reset`, body),
   adminDeleteUser: (id: number, adminPassword: string, totp?: string) =>
     request<{ ok: true }>('POST', `/api/admin/users/${id}/delete`, { adminPassword, ...(totp ? { totp } : {}) }),

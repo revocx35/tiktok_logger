@@ -46,6 +46,8 @@ type Backend interface {
 	// Ensure starts the instance if needed and waits until Chromium's DevTools endpoint answers.
 	Ensure(ctx context.Context, id int) error
 	Restart(ctx context.Context, id int) error
+	// Stop shuts the instance's browser down but keeps its profile (the TikTok login); Ensure starts it again.
+	Stop(ctx context.Context, id int) error
 	// Delete stops the instance and removes everything it owns (profile included).
 	Delete(ctx context.Context, id int) error
 	// Ports of a running instance (loopback only).
@@ -149,6 +151,17 @@ func (m *Manager) Restart(ctx context.Context, id int) error {
 		return err
 	}
 	return waitCDP(ctx, cdp)
+}
+
+func (m *Manager) Stop(ctx context.Context, id int) error {
+	in, _ := m.instance(id, false)
+	if in == nil {
+		return nil
+	}
+	in.mu.Lock()
+	in.stop()
+	in.mu.Unlock()
+	return nil
 }
 
 func (m *Manager) Delete(ctx context.Context, id int) error {

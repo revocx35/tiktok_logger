@@ -108,6 +108,25 @@ describe('gateway: multi-user', () => {
       expect((await admin.req('POST', '/api/admin/users', { username: 'third', port: null })).status).toBe(409);
     });
 
+    it('lets the admin set a TikTok session schedule per user and validates it', async () => {
+      const { temporaryPassword } = await createUser('friend');
+      await claim(new Browser(g.port), 'friend', temporaryPassword);
+      const id = g.repo.getUserByName('friend')!.id;
+      const cfg = { mode: 'scheduled', offMinutes: 240, onMinutes: 20, randomize: true, offJitterMinutes: 30, onJitterMinutes: 5 };
+      const ok = await admin.req('PUT', `/api/admin/users/${id}/tt-schedule`, cfg);
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body).toMatchObject({ ...cfg, phase: 'on' });
+      const ov = (await admin.req('GET', '/api/admin/overview')).body as AdminOverview;
+      expect(ov.users.find((u) => u.id === id)?.ttSchedule).toMatchObject({ mode: 'scheduled', randomize: true });
+      expect(ov.users.find((u) => u.username === 'admin')?.ttSchedule).toMatchObject({ mode: 'on' });
+      for (const bad of [{ ...cfg, mode: 'x' }, { ...cfg, offMinutes: 0 }, { ...cfg, onJitterMinutes: 20 }, { ...cfg, extra: true }]) {
+        expect((await admin.req('PUT', `/api/admin/users/${id}/tt-schedule`, bad)).status, JSON.stringify(bad)).toBe(400);
+      }
+      expect((await admin.req('PUT', `/api/admin/users/${id}/tt-schedule`, cfg, { csrf: false })).status).toBe(403);
+      expect((await new Browser(g.port).req('PUT', `/api/admin/users/${id}/tt-schedule`, cfg)).status).toBe(401);
+      expect((await admin.req('PUT', '/api/admin/users/999/tt-schedule', cfg)).status).toBe(404);
+    });
+
     it('keeps users out of the admin API', async () => {
       const { temporaryPassword } = await createUser('friend');
       const friend = new Browser(g.port);
@@ -118,6 +137,7 @@ describe('gateway: multi-user', () => {
         ['GET', '/api/admin/audit', undefined],
         ['POST', '/api/admin/users', { username: 'sneaky', port: null }],
         ['PATCH', '/api/admin/users/1', { disabled: true }],
+        ['PUT', '/api/admin/users/1/tt-schedule', { mode: 'off', offMinutes: 60, onMinutes: 10, randomize: false, offJitterMinutes: 0, onJitterMinutes: 0 }],
         ['POST', '/api/admin/users/1/reset', { mode: 'wipe', adminPassword: ADMIN_PW }],
         ['POST', '/api/admin/users/1/delete', { adminPassword: ADMIN_PW }],
         ['PUT', `/api/admin/ports/${PORT_A}`, { origin: null }],

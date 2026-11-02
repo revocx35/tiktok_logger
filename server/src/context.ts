@@ -6,6 +6,7 @@ import type { ResolvedItem } from './tt/items.js';
 import { Errors } from './errors.js';
 import { DataWriter } from './crypto/keyring.js';
 import type { Repo } from './db/repo.js';
+import { TtScheduler } from './tt/schedule.js';
 import { Throttle } from './auth/throttle.js';
 import type { EventBus } from './events.js';
 import type { Logger } from './log.js';
@@ -91,8 +92,13 @@ export interface TtController {
   status(): TtStatus;
   /** Idempotent. Starts connecting to Chromium / TikTok. */
   start(): Promise<void>;
-  /** Reconnects to Chromium and reloads the TikTok tab. */
+  /** Reconnects to Chromium and reloads the TikTok tab. Refused while the session is switched off. */
   restart(): Promise<void>;
+  /** Session schedule: detaches, stops the tenant's browser (profile kept) and stays down until resume(). Idempotent. */
+  pause(): Promise<void>;
+  /** Undoes pause(): starts the browser and connects. Idempotent. */
+  resume(): Promise<void>;
+  isPaused(): boolean;
   /** Logs the TikTok tab out (the owner logs in again on the TikTok screen). */
   logout(): Promise<void>;
   /** Logs in with a session (cookies) from the owner's own browser, instead of the login form. */
@@ -131,6 +137,8 @@ export interface PageProbe {
 export class AppContext {
   private writerInstance: DataWriter | null = null;
   tt: TtController;
+  /** The admin's on/off schedule for the TikTok session. */
+  readonly schedule: TtScheduler;
   /** Every registered route (filled by an onRoute hook) — used by the auth coverage test. */
   readonly routeTable: { method: string; url: string; public: boolean }[] = [];
   /** Brute-force throttle shared by every credential check. */
@@ -146,6 +154,17 @@ export class AppContext {
   ) {
     this.tt = tt ?? new NullTt();
     this.throttle = new Throttle(repo);
+    // Reads this.tt on every call: createApp swaps the controller in after construction.
+    this.schedule = new TtScheduler(
+      repo,
+      {
+        start: () => this.tt.start(),
+        pause: () => this.tt.pause(),
+        resume: () => this.tt.resume(),
+        isPaused: () => this.tt.isPaused(),
+      },
+      log,
+    );
   }
 
   /** The encryptor for new data; null until an owner (and thus a public key) exists. */
@@ -226,6 +245,16 @@ export class NullTt implements TtController {
   }
   async start(): Promise<void> {}
   async restart(): Promise<void> {}
+  private paused = false;
+  async pause(): Promise<void> {
+    this.paused = true;
+  }
+  async resume(): Promise<void> {
+    this.paused = false;
+  }
+  isPaused(): boolean {
+    return this.paused;
+  }
   async logout(): Promise<void> {}
   async importSession(_cookies: SessionCookie[]): Promise<void> {
     throw Errors.unavailable('TikTok is not enabled.');

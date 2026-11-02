@@ -11,6 +11,8 @@ and stores it encrypted on your disk. You can also send messages from the web UI
   server cannot read them while you are logged out, and neither can anyone who steals the disk.
 * **Multi-user:** the admin creates accounts; each user has their own TikTok login, keys, database and browser. Nobody
   sees anybody else's data — not even the admin.
+* **Session schedule:** per user the admin can keep the TikTok session always on, always off, or alternating (off for hours,
+  on for minutes) with an optional random jitter — the browser is really shut down while it is off.
 * **Repeatable:** Docker Compose, three containers, no TikTok password stored anywhere (the login lives in the browser
   profile, like a normal browser session).
 

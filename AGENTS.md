@@ -22,6 +22,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 | `server/src/tt/im/` | IM protocol in the tab: `wire.ts`, `proto.ts`, `engine.ts` (import, catch-up, unsend, send, profiles), `transport.ts` |
 | `server/src/tt/stories.ts`, `api/stories.ts` | Story logging (stories-bar + batch parsers, timer, media, retention) and its routes |
 | `server/src/tt/items.ts`, `api/items.ts`, `api/messageType.ts` | One TikTok post by id for the chat cards (resolved through the tab, media proxied + ranged) and the stored-type → `MessageType` / share-card mapping |
+| `server/src/tt/schedule.ts` | Admin's per-user session schedule (on / off / scheduled + randomizer): `TtScheduler`, runs in the worker, calls `TtService.pause()/resume()` (which also stops/starts the tenant's Chromium via the manager's `POST /i/<id>/stop`) |
 | `server/src/tt/` | TikTok layer: `service.ts` (lifecycle, timers, tabs), `dom.ts` (messages page agent), `sender.ts`, `watcher.ts` (CDP capture), `frames.ts`/`mapper.ts`/`ingest.ts`, `feed.ts` (+`FeedCatalog`) / `feedAgent.ts` / `feedMedia.ts`, `download.ts`, `loginwatch.ts`, `cookies.ts` |
 | `server/src/api/` | Routes: chats, media, send, feed, items, stories, admin, settings, audit, SSE |
 | `web/src/` | React UI (`pages/Feed.tsx` + `components/VideoStack.tsx` (the shared player), `pages/Profile.tsx`, `pages/Stories.tsx`, `ChatView.tsx`, `Settings.tsx`, …); `components/TikTokCard.tsx` is the playable post card in a chat |
@@ -32,7 +33,7 @@ Read before changing anything: [ARCHITECTURE.md](ARCHITECTURE.md) (design, secur
 ## Commands
 
 ```bash
-cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 253 tests
+cd server && PUPPETEER_SKIP_DOWNLOAD=true npm ci && npm test && npx tsc --noEmit    # 269 tests
 cd web && npm ci && npm test && npm run build                                        # strict-CSP build (18 tests)
 cd server && npx tsx ../scripts/dev/service-check.mts   # real service vs fake TikTok (headless Chromium)
 ```
@@ -68,6 +69,10 @@ CI publishes `ghcr.io/revocx35/tiktok_logger-{app,chromium,caddy}` on `main`. Th
 - Attach to the tab while logged out (`loginwatch.ts`), weaken CSP/cookies/CSRF/the Chromium sandbox, edit old migrations.
 
 ## Gotchas
+
+- **Session schedule (v1.16):** `TtService.paused` makes `start()/connect()` no-ops and `restart()/importSession()` 409. Anything new that wakes
+  the TikTok session (connects, `chromium.ensure()`) must respect it, or "off" leaks. Don't add a `TtState` value for it (old Android
+  clients crash on unknown enums) — it is `idle` + a detail. The phase is persisted in the tenant DB; tests inject `clock`/`rand`.
 
 - **The look is TikTok's** (v1.14, ARCHITECTURE §5): change colours through the tokens at the top of `web/src/styles.css`
   (own bubbles = `--out` only), add icons to `components/Icon.tsx` as outline + solid `…Fill` twin when they go in the

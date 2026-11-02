@@ -52,6 +52,8 @@ export class TtService implements TtController, ChatDriver {
   private lastEventAt: number | null = null;
   private connecting = false;
   private stopped = false;
+  /** Switched off by the session schedule: nothing connects, and the tenant's browser is down. */
+  private paused = false;
   private attempt = 0;
   private gen = 0;
   /** True when this process connected the browser itself (a test's browser is left alone on teardown). */
@@ -161,6 +163,7 @@ export class TtService implements TtController, ChatDriver {
   }
 
   async restart(): Promise<void> {
+    if (this.paused) throw Errors.conflict('The TikTok session is switched off by the admin schedule.');
     await this.teardown();
     this.stopped = false;
     this.since = Date.now();
@@ -171,6 +174,31 @@ export class TtService implements TtController, ChatDriver {
     this.stopped = true;
     await this.teardown();
     this.setState('idle');
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
+  /** Session schedule "off": detach everything and shut the browser down so TikTok sees no activity. Idempotent. */
+  async pause(): Promise<void> {
+    if (this.paused) return;
+    this.paused = true;
+    this.stopped = true;
+    await this.teardown();
+    this.setState('idle', 'Switched off by the session schedule.');
+    // The profile (the TikTok login) stays on disk; only the processes go. Tests hand in their own browser: leave it.
+    if (!this.connectHook && !(await this.chromium.stop())) this.ctx.log.warn('could not stop the browser for the session schedule');
+  }
+
+  /** Session schedule "on": connect again (this starts the browser). Idempotent. */
+  async resume(): Promise<void> {
+    if (!this.paused) return;
+    this.paused = false;
+    this.stopped = false;
+    this.attempt = 0;
+    this.since = Date.now();
+    await this.connect(false);
   }
 
   /** Logs the TikTok tab out: the owner logs in again on the TikTok screen. */
@@ -191,6 +219,7 @@ export class TtService implements TtController, ChatDriver {
   /** Logs in with the session of the owner's own browser (cookies from a request to www.tiktok.com). */
   async importSession(cookies: SessionCookie[]): Promise<void> {
     if (cookies.length === 0) throw Errors.validation('No cookies were found.');
+    if (this.paused) throw Errors.conflict('The TikTok session is switched off by the admin schedule.');
     const origin = this.ctx.config.ttWebOrigin;
     const target = this.chromium.cdpTarget();
     if (!(await this.chromium.ensure())) throw Errors.unavailable('The browser is not reachable yet. Try again in a moment.');
@@ -253,7 +282,7 @@ export class TtService implements TtController, ChatDriver {
   }
 
   private async connect(fresh: boolean): Promise<void> {
-    if (this.stopped || this.connecting) return;
+    if (this.stopped || this.paused || this.connecting) return;
     this.connecting = true;
     const gen = ++this.gen;
     try {

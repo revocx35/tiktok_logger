@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import type { AdminAuditEntry, AdminOverview, AdminUser, TtStatus, ResetMode, UserStatus } from '../../../shared/api';
+import type { AdminAuditEntry, AdminOverview, AdminUser, TtScheduleConfig, TtStatus, ResetMode, UserStatus } from '../../../shared/api';
 import { api, errorMessage } from '../api/client';
 import { Icon } from '../components/Icon';
 import { ErrorNote, TtStatePill, Modal, Spinner } from '../components/ui';
-import { formatDateTime } from '../lib/format';
+import { formatDateTime, formatTime } from '../lib/format';
 import { useAppState } from '../state/AppState';
 import { RecoveryKeyBox } from './Auth';
 
@@ -212,6 +212,155 @@ function ResetModal({ o, user, onClose, onDone }: { o: AdminOverview; user: Admi
   );
 }
 
+/** "4 h 30 min" for a minute count. */
+export function humanMinutes(total: number): string {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h && m) return `${h} h ${m} min`;
+  return h ? `${h} h` : `${m} min`;
+}
+
+/** One-line summary of a user's session schedule for the table. */
+export function scheduleLine(u: AdminUser): string | null {
+  const sc = u.ttSchedule;
+  if (!sc || sc.mode === 'on') return null;
+  if (sc.mode === 'off') return 'Always off';
+  const until = sc.phaseUntil ? ` until ${formatTime(sc.phaseUntil)}` : '';
+  return `Scheduled · ${sc.phase === 'on' ? 'on' : 'off'}${until}`;
+}
+
+/** Hours + minutes fields for a length in minutes. */
+function Duration({ label, minutes, onChange, min = 0 }: { label: string; minutes: number; onChange: (m: number) => void; min?: number }) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const set = (nh: number, nm: number) => onChange(Math.max(min, Math.min(10080, nh * 60 + nm)));
+  return (
+    <div className="row gap">
+      <label>
+        {label} <span className="muted">hours</span>
+        <input type="number" min={0} max={168} value={h} onChange={(e) => set(Math.max(0, Number(e.target.value) || 0), m)} />
+      </label>
+      <label>
+        <span className="muted">minutes</span>
+        <input type="number" min={0} max={59} value={m} onChange={(e) => set(h, Math.max(0, Math.min(59, Number(e.target.value) || 0)))} />
+      </label>
+    </div>
+  );
+}
+
+function SessionModal({ user, onClose, onDone }: { user: AdminUser; onClose: () => void; onDone: () => void }) {
+  const cur = user.ttSchedule;
+  const [cfg, setCfg] = useState<TtScheduleConfig>({
+    mode: cur?.mode ?? 'on',
+    offMinutes: cur?.offMinutes ?? 240,
+    onMinutes: cur?.onMinutes ?? 20,
+    randomize: cur?.randomize ?? false,
+    offJitterMinutes: cur?.offJitterMinutes ?? 30,
+    onJitterMinutes: cur?.onJitterMinutes ?? 5,
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const patch = (p: Partial<TtScheduleConfig>) => setCfg((c) => ({ ...c, ...p }));
+
+  const problem =
+    cfg.mode !== 'scheduled'
+      ? null
+      : cfg.offMinutes < 1 || cfg.onMinutes < 1
+        ? 'Both times must be at least 1 minute.'
+        : cfg.randomize && cfg.offJitterMinutes >= cfg.offMinutes
+          ? 'The random range of the off time must be shorter than the off time.'
+          : cfg.randomize && cfg.onJitterMinutes >= cfg.onMinutes
+            ? 'The random range of the on time must be shorter than the on time.'
+            : null;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.adminSetTtSchedule(user.id, cfg);
+      onDone();
+      onClose();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`TikTok session · ${user.username}`} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <fieldset className="radio-group">
+          <label className="radio">
+            <input type="radio" name="mode" checked={cfg.mode === 'on'} onChange={() => patch({ mode: 'on' })} />
+            <span>
+              <strong>Always on.</strong> The TikTok session runs all the time and every message is logged.
+            </span>
+          </label>
+          <label className="radio">
+            <input type="radio" name="mode" checked={cfg.mode === 'off'} onChange={() => patch({ mode: 'off' })} />
+            <span>
+              <strong>Always off.</strong> The TikTok browser is shut down (the login is kept). Nothing is logged until you switch it on.
+            </span>
+          </label>
+          <label className="radio">
+            <input type="radio" name="mode" checked={cfg.mode === 'scheduled'} onChange={() => patch({ mode: 'scheduled' })} />
+            <span>
+              <strong>Scheduled.</strong> Off for a while, then on for a while, over and over. It starts with the on time.
+            </span>
+          </label>
+        </fieldset>
+        {cfg.mode === 'scheduled' ? (
+          <>
+            <Duration label="Off for" minutes={cfg.offMinutes} onChange={(m) => patch({ offMinutes: m })} min={1} />
+            <Duration label="Then on for" minutes={cfg.onMinutes} onChange={(m) => patch({ onMinutes: m })} min={1} />
+            <label className="radio">
+              <input type="checkbox" checked={cfg.randomize} onChange={(e) => patch({ randomize: e.target.checked })} />
+              <span>
+                <strong>Randomize.</strong> Each off and on time is the length above plus or minus a random amount, so the pattern never repeats exactly.
+              </span>
+            </label>
+            {cfg.randomize ? (
+              <>
+                <label>
+                  Off time ± <span className="muted">minutes</span>
+                  <input type="number" min={0} max={10079} value={cfg.offJitterMinutes} onChange={(e) => patch({ offJitterMinutes: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                </label>
+                <label>
+                  On time ± <span className="muted">minutes</span>
+                  <input type="number" min={0} max={10079} value={cfg.onJitterMinutes} onChange={(e) => patch({ onJitterMinutes: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                </label>
+              </>
+            ) : null}
+            <p className="muted small">
+              {cfg.randomize
+                ? `Off for ${humanMinutes(Math.max(1, cfg.offMinutes - cfg.offJitterMinutes))} – ${humanMinutes(cfg.offMinutes + cfg.offJitterMinutes)}, then on for ${humanMinutes(Math.max(1, cfg.onMinutes - cfg.onJitterMinutes))} – ${humanMinutes(cfg.onMinutes + cfg.onJitterMinutes)}.`
+                : `Off for ${humanMinutes(cfg.offMinutes)}, then on for ${humanMinutes(cfg.onMinutes)}.`}{' '}
+              While it is off nothing is logged; the log catches up when it comes back on (a message unsent during the off time can be missed).
+            </p>
+          </>
+        ) : null}
+        {cur && cur.mode !== 'on' ? (
+          <p className="muted small">
+            Right now: <strong>{cur.phase === 'on' ? 'on' : 'off'}</strong>
+            {cur.phaseUntil ? ` until ${formatDateTime(cur.phaseUntil)}` : ''}.
+          </p>
+        ) : null}
+        <ErrorNote error={error ?? problem} />
+        <div className="row gap">
+          <button className="btn primary" disabled={busy || !!problem}>
+            {busy ? <Spinner size={18} /> : 'Save'}
+          </button>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function DeleteModal({ user, onClose, onDone }: { user: AdminUser; onClose: () => void; onDone: () => void }) {
   const [adminPassword, setAdminPassword] = useState('');
   const [totp, setTotp] = useState('');
@@ -256,6 +405,7 @@ function UsersSection({ o, reload }: { o: AdminOverview; reload: () => Promise<v
   const [adding, setAdding] = useState(false);
   const [resetting, setResetting] = useState<AdminUser | null>(null);
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
+  const [session, setSession] = useState<AdminUser | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -306,6 +456,7 @@ function UsersSection({ o, reload }: { o: AdminOverview; reload: () => Promise<v
                   </td>
                   <td>
                     {u.tt ? <TtStatePill status={{ state: u.tt, mediaQueue: 0, sync: null, since: 0, lastEventAt: null } as TtStatus} /> : <span className="muted">—</span>}
+                    {scheduleLine(u) ? <div className="muted small">{scheduleLine(u)}</div> : null}
                   </td>
                   <td>
                     {u.role === 'admin' ? (
@@ -316,6 +467,11 @@ function UsersSection({ o, reload }: { o: AdminOverview; reload: () => Promise<v
                   </td>
                   <td className="small">{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : '—'}</td>
                   <td className="actions">
+                    {u.status === 'active' ? (
+                      <button className="btn tiny" onClick={() => setSession(u)}>
+                        Session…
+                      </button>
+                    ) : null}
                     {u.role === 'admin' ? null : (
                       <>
                         <button className="btn tiny" disabled={busyId === u.id} onClick={() => void patch(u, { disabled: !u.disabled })}>
@@ -352,6 +508,7 @@ function UsersSection({ o, reload }: { o: AdminOverview; reload: () => Promise<v
           }}
         />
       ) : null}
+      {session ? <SessionModal user={session} onClose={() => setSession(null)} onDone={() => void reload()} /> : null}
       {resetting ? <ResetModal o={o} user={resetting} onClose={() => setResetting(null)} onDone={() => void reload()} /> : null}
       {deleting ? <DeleteModal user={deleting} onClose={() => setDeleting(null)} onDone={() => void reload()} /> : null}
     </Section>

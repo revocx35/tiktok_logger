@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { derivePasswordKeys, newSalt, PASSWORD_MAX } from '../crypto/password.js';
 import { Errors } from '../errors.js';
+import { ScheduleSchema } from '../tt/schedule.js';
 
 const Username = z
   .string()
@@ -35,8 +36,19 @@ export function registerInternalRoutes(
       pending: pending?.mode ?? null,
       totpEnabled: !!owner?.totp_enabled,
       tt: ctx.tt.status().state,
+      ttSchedule: ctx.schedule.view(),
       onboardingComplete: repo.getState('onboarding_complete') === '1',
     };
+  });
+
+  /** The admin's TikTok session schedule for this user (the gateway's admin routes call these). */
+  app.get('/internal/tt-schedule', cfg, async () => ctx.schedule.view());
+
+  app.put('/internal/tt-schedule', cfg, async (req) => {
+    const body = ScheduleSchema.parse(req.body);
+    const view = await ctx.schedule.set(body);
+    repo.audit('tt_schedule_set', req.ip, body.mode === 'scheduled' ? `scheduled off ${body.offMinutes}m on ${body.onMinutes}m${body.randomize ? ` random ±${body.offJitterMinutes}/±${body.onJitterMinutes}m` : ''}` : body.mode);
+    return view;
   });
 
   /** The admin's own account: created with the password they chose (the gateway checked the setup token). */

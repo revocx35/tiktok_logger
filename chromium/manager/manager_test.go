@@ -27,6 +27,10 @@ func (f *fakeBackend) Ensure(ctx context.Context, id int) error {
 	return nil
 }
 func (f *fakeBackend) Restart(ctx context.Context, id int) error { return f.Ensure(ctx, id) }
+func (f *fakeBackend) Stop(ctx context.Context, id int) error {
+	delete(f.running, id)
+	return nil
+}
 func (f *fakeBackend) Delete(ctx context.Context, id int) error {
 	f.deleted = append(f.deleted, id)
 	delete(f.running, id)
@@ -337,5 +341,22 @@ func TestChildEnvCapsSoftwareGL(t *testing.T) {
 		if strings.HasPrefix(e, "CONTROL_SECRET") {
 			t.Fatal("the control secret leaked into a browser's environment")
 		}
+	}
+}
+
+func TestStopNeedsTheInstanceToken(t *testing.T) {
+	f := &fakeBackend{running: map[int]bool{2: true}}
+	h := NewHandler(f, secret)
+	if rec := do(t, h, "POST", "/i/2/stop", ""); rec.Code != 401 {
+		t.Fatalf("no token: %d", rec.Code)
+	}
+	if rec := do(t, h, "POST", "/i/2/stop", instanceToken(secret, 3)); rec.Code != 401 {
+		t.Fatalf("another instance's token: %d", rec.Code)
+	}
+	if rec := do(t, h, "POST", "/i/2/stop", instanceToken(secret, 2)); rec.Code != 200 {
+		t.Fatalf("own token: %d", rec.Code)
+	}
+	if f.running[2] {
+		t.Fatal("instance should be stopped")
 	}
 }

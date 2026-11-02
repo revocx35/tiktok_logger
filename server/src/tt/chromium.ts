@@ -65,6 +65,16 @@ export class ChromiumLink {
     }
   }
 
+  /** Shuts this tenant's browser down (the profile and the TikTok login stay); ensure() starts it again. */
+  async stop(timeoutMs = 30_000): Promise<boolean> {
+    try {
+      const r = await fetch(this.path('/stop'), { method: 'POST', headers: this.headers, signal: AbortSignal.timeout(timeoutMs) });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async reachable(timeoutMs = 3000): Promise<boolean> {
     try {
       const r = await fetch(this.path('/cdp/json/version'), { headers: this.headers, signal: AbortSignal.timeout(timeoutMs) });
